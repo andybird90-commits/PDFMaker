@@ -61,6 +61,7 @@ type TimeEntry = {
 type FolderNode = { id: string; name: string; parentId: string | null };
 type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
 type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
+type OpsScreen = "sign" | "timesheet" | "files" | "forms" | "form-use" | "dashboard";
 type BatchDocument = {
   id: string;
   name: string;
@@ -97,6 +98,14 @@ const FORM_TEMPLATES: FormTemplate[] = [
   { id: "rams", name: "RAMS", version: "v1.0", updatedAt: "15/06/2025" },
   { id: "materials-delivery", name: "Materials Delivery", version: "v1.2", updatedAt: "10/06/2025" },
   { id: "handover-checklist", name: "Handover Checklist", version: "v1.1", updatedAt: "05/06/2025" },
+];
+const OPS_NAV_ITEMS: Array<{ id: OpsScreen; label: string }> = [
+  { id: "sign", label: "Sign In" },
+  { id: "timesheet", label: "Timesheet" },
+  { id: "files", label: "Files" },
+  { id: "forms", label: "Forms" },
+  { id: "form-use", label: "Form In Use" },
+  { id: "dashboard", label: "Dashboard" },
 ];
 
 function makeId(): string {
@@ -160,6 +169,7 @@ function App() {
   const [fileSearch, setFileSearch] = useState<string>("");
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
+  const [activeOpsScreen, setActiveOpsScreen] = useState<OpsScreen>("sign");
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -2485,6 +2495,20 @@ function App() {
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
     const completedForms = FORM_TEMPLATES.filter((form) => completedFormIds.includes(form.id));
     const activeForm = FORM_TEMPLATES.find((form) => form.id === activeFormId) ?? null;
+    const renderBottomNav = (): ReactElement => (
+      <nav className="opsPhoneNav" aria-label="Operations navigation">
+        {OPS_NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={activeOpsScreen === item.id ? "active" : ""}
+            onClick={() => setActiveOpsScreen(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+    );
 
     return (
       <main className="opsMain opsExperience">
@@ -2498,9 +2522,28 @@ function App() {
             {opsLoading ? " (syncing...)" : ""}
           </p>
         </section>
+        <section className="opsRibbon">
+          {OPS_NAV_ITEMS.map((item) => (
+            <button
+              key={`ribbon-${item.id}`}
+              type="button"
+              className={activeOpsScreen === item.id ? "active" : ""}
+              onClick={() => setActiveOpsScreen(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </section>
 
         <section className="opsPhoneGrid">
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "sign" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("sign")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Field Ops</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>1. GPS Sign In / Out</h3>
             </header>
@@ -2548,6 +2591,7 @@ function App() {
                 <div className="opsInline">
                   <button
                     type="button"
+                    className="btnSuccess"
                     onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
                     disabled={!selectedWorker || opsLoading}
                   >
@@ -2555,6 +2599,7 @@ function App() {
                   </button>
                   <button
                     type="button"
+                    className="btnWarning"
                     onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_out")}
                     disabled={!selectedWorker || opsLoading}
                   >
@@ -2563,9 +2608,17 @@ function App() {
                 </div>
               </div>
             </div>
+            {renderBottomNav()}
           </article>
 
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "timesheet" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("timesheet")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Timesheet</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>2. Timesheet Generation</h3>
             </header>
@@ -2594,9 +2647,17 @@ function App() {
                 </div>
               ))}
             </div>
+            {renderBottomNav()}
           </article>
 
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "files" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("files")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Project Files</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>3. Project Files</h3>
             </header>
@@ -2666,9 +2727,17 @@ function App() {
                 </div>
               </div>
             </div>
+            {renderBottomNav()}
           </article>
 
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "forms" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("forms")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Forms Library</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>4. Forms Library</h3>
             </header>
@@ -2686,9 +2755,17 @@ function App() {
               ))}
             </div>
             {availableForms.length === 0 ? <p>All forms completed.</p> : null}
+            {renderBottomNav()}
           </article>
 
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "form-use" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("form-use")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Form In Use</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>5. Form In Use / Export</h3>
             </header>
@@ -2701,6 +2778,7 @@ function App() {
                 <div className="opsInline">
                   <button
                     type="button"
+                    className="btnSuccess"
                     onClick={() => {
                       if (!activeForm) return;
                       setCompletedFormIds((prev) => (prev.includes(activeForm.id) ? prev : [...prev, activeForm.id]));
@@ -2711,6 +2789,7 @@ function App() {
                   </button>
                   <button
                     type="button"
+                    className="btnWarning"
                     onClick={() => {
                       if (!activeForm) return;
                       notify(`Exported ${activeForm.name} as PDF.`);
@@ -2734,9 +2813,17 @@ function App() {
                 </div>
               ))}
             </div>
+            {renderBottomNav()}
           </article>
 
-          <article className="opsPhoneCard">
+          <article
+            className={`opsPhoneCard ${activeOpsScreen === "dashboard" ? "isFocused" : ""}`}
+            onClick={() => setActiveOpsScreen("dashboard")}
+          >
+            <div className="opsPhoneTopBar">
+              <span>9:41</span>
+              <span>Project Dashboard</span>
+            </div>
             <header className="opsPhoneHeader">
               <h3>6. Project Dashboard</h3>
             </header>
@@ -2770,6 +2857,7 @@ function App() {
               ))}
             </div>
             <small className="opsSubtle">Open pins needing attention: {projectStats.openPins}</small>
+            {renderBottomNav()}
           </article>
         </section>
       </main>

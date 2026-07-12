@@ -225,6 +225,26 @@ label {
   gap: 0.9rem;
 }
 
+.opsRibbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.1rem 0.1rem 0.3rem;
+}
+
+.opsRibbon button {
+  border-radius: 999px;
+  border-color: #24405f;
+  background: rgba(14, 32, 53, 0.85);
+  color: #b4c8e2;
+}
+
+.opsRibbon button.active {
+  background: #fb923c;
+  border-color: #fb923c;
+  color: #1f2937;
+}
+
 .opsPhoneCard {
   border: 1px solid #223147;
   border-radius: 18px;
@@ -235,6 +255,26 @@ label {
   flex-direction: column;
   gap: 0.6rem;
   min-height: 260px;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.opsPhoneCard.isFocused {
+  border-color: #fb923c;
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.4);
+}
+
+.opsPhoneTopBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.68rem;
+  color: #7f93ad;
+  letter-spacing: 0.02em;
 }
 
 .opsPhoneHeader h3 {
@@ -339,6 +379,48 @@ label {
 
 .opsRowButton {
   width: 100%;
+}
+
+.opsPhoneNav {
+  margin-top: auto;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(49, 74, 104, 0.55);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.28rem;
+}
+
+.opsPhoneNav button {
+  min-height: 28px;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.66rem;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #94a3b8;
+  border-color: #27415f;
+}
+
+.opsPhoneNav button.active {
+  background: #fb923c;
+  border-color: #fb923c;
+  color: #1f2937;
+}
+
+.btnSuccess {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #f8fafc;
+}
+
+.btnWarning {
+  background: #f97316;
+  border-color: #f97316;
+  color: #f8fafc;
+}
+
+.btnSuccess:hover:not(:disabled),
+.btnWarning:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .opsFolderGrid {
