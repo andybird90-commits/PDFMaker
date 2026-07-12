@@ -204,6 +204,12 @@ label {
   font-size: 0.95rem;
 }
 
+.opsBackendTag {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  color: #93c5fd;
+}
+
 .opsInline {
   display: flex;
   align-items: center;

@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/andybird90-commits/PDFMaker#readme",
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.2",
     "fabric": "^7.4.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.1.200",

@@ -90,6 +90,28 @@ npm run build
 npm run preview
 ```
 
+## Supabase setup (Operations module)
+
+The operations module (workers, clock in/out, folders, files) can run on:
+
+- localStorage (default fallback), or
+- Supabase (recommended for multi-user persistence).
+
+1. Create a `.env` file from `.env.example` and fill:
+
+```bash
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+2. In Supabase SQL editor, run:
+
+- `supabase/schema.sql`
+
+3. Restart dev server.
+
+When configured, the UI shows `Backend: Supabase` in Operations.
+
 ## Annotation data format
 
 Saved markup JSON includes:

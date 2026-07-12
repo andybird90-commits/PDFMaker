@@ -12,6 +12,7 @@ import {
   polylineToPath,
   rectFromPoints,
 } from "./annotationUtils";
+import { hasSupabaseConfig, supabase } from "./lib/supabase";
 import type {
   Annotation,
   EditorProjectDocument,
@@ -137,6 +138,7 @@ function App() {
   const [newFolderName, setNewFolderName] = useState<string>("");
   const [newFileName, setNewFileName] = useState<string>("");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [opsLoading, setOpsLoading] = useState<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -228,29 +230,87 @@ function App() {
   }, [customStamps]);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(OPS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        workers?: Worker[];
-        timeEntries?: TimeEntry[];
-        folders?: FolderNode[];
-        projectFiles?: ProjectFile[];
-      };
-      setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
-      setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
-      const loadedFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
-      setFolders(loadedFolders);
-      setProjectFiles(Array.isArray(parsed.projectFiles) ? parsed.projectFiles : []);
-      if (loadedFolders.length > 0) {
-        setSelectedFolderId(loadedFolders[0].id);
+    async function loadOpsData(): Promise<void> {
+      if (hasSupabaseConfig && supabase) {
+        setOpsLoading(true);
+        try {
+          const [workersRes, entriesRes, foldersRes, filesRes] = await Promise.all([
+            supabase.from("workers").select("id,name,role").order("created_at", { ascending: false }),
+            supabase.from("time_entries").select("id,worker_id,action,at,note").order("at", { ascending: false }),
+            supabase.from("folders").select("id,name,parent_id").order("created_at", { ascending: false }),
+            supabase
+              .from("project_files")
+              .select("id,folder_id,name,status,updated_at")
+              .order("updated_at", { ascending: false }),
+          ]);
+          if (workersRes.error) throw workersRes.error;
+          if (entriesRes.error) throw entriesRes.error;
+          if (foldersRes.error) throw foldersRes.error;
+          if (filesRes.error) throw filesRes.error;
+          const loadedWorkers = (workersRes.data ?? []).map((row) => ({
+            id: row.id,
+            name: row.name,
+            role: row.role,
+          }));
+          const loadedEntries = (entriesRes.data ?? []).map((row) => ({
+            id: row.id,
+            workerId: row.worker_id,
+            action: row.action as TimeEntry["action"],
+            at: row.at,
+            note: row.note ?? undefined,
+          }));
+          const loadedFolders = (foldersRes.data ?? []).map((row) => ({
+            id: row.id,
+            name: row.name,
+            parentId: row.parent_id,
+          }));
+          const loadedFiles = (filesRes.data ?? []).map((row) => ({
+            id: row.id,
+            folderId: row.folder_id,
+            name: row.name,
+            status: row.status,
+            updatedAt: row.updated_at,
+          }));
+          setWorkers(loadedWorkers);
+          setTimeEntries(loadedEntries);
+          setFolders(loadedFolders);
+          setProjectFiles(loadedFiles);
+          setSelectedFolderId(loadedFolders[0]?.id ?? null);
+        } catch (error) {
+          notify(`Supabase load failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          setOpsLoading(false);
+        }
+        return;
       }
-    } catch {
-      // Keep app usable if ops storage was malformed.
+
+      try {
+        const raw = window.localStorage.getItem(OPS_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          workers?: Worker[];
+          timeEntries?: TimeEntry[];
+          folders?: FolderNode[];
+          projectFiles?: ProjectFile[];
+        };
+        setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
+        setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
+        const loadedFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
+        setFolders(loadedFolders);
+        setProjectFiles(Array.isArray(parsed.projectFiles) ? parsed.projectFiles : []);
+        if (loadedFolders.length > 0) {
+          setSelectedFolderId(loadedFolders[0].id);
+        }
+      } catch {
+        // Keep app usable if ops storage was malformed.
+      }
     }
+
+    void loadOpsData();
   }, []);
 
   useEffect(() => {
+    if (hasSupabaseConfig && supabase) return;
     window.localStorage.setItem(
       OPS_STORAGE_KEY,
       JSON.stringify({
@@ -1082,25 +1142,75 @@ function App() {
     setActiveCustomStampId("");
   }
 
-  function addWorker(): void {
+  async function addWorker(): Promise<void> {
     const name = newWorkerName.trim();
     if (!name) {
       notify("Enter worker name.");
       return;
     }
+    const role = newWorkerRole.trim() || "Technician";
+    if (hasSupabaseConfig && supabase) {
+      setOpsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("workers")
+          .insert({ name, role })
+          .select("id,name,role")
+          .single();
+        if (error) throw error;
+        const worker: Worker = {
+          id: data.id,
+          name: data.name,
+          role: data.role,
+        };
+        setWorkers((prev) => [worker, ...prev]);
+        setNewWorkerName("");
+        notify(`Added worker ${worker.name}.`);
+      } catch (error) {
+        notify(`Add worker failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setOpsLoading(false);
+      }
+      return;
+    }
     const worker: Worker = {
       id: makeId(),
       name,
-      role: newWorkerRole.trim() || "Technician",
+      role,
     };
     setWorkers((prev) => [worker, ...prev]);
     setNewWorkerName("");
     notify(`Added worker ${worker.name}.`);
   }
 
-  function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): void {
+  async function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): Promise<void> {
     const worker = workerById[workerId];
     if (!worker) return;
+    if (hasSupabaseConfig && supabase) {
+      setOpsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("time_entries")
+          .insert({ worker_id: workerId, action, at: new Date().toISOString() })
+          .select("id,worker_id,action,at,note")
+          .single();
+        if (error) throw error;
+        const entry: TimeEntry = {
+          id: data.id,
+          workerId: data.worker_id,
+          action: data.action as TimeEntry["action"],
+          at: data.at,
+          note: data.note ?? undefined,
+        };
+        setTimeEntries((prev) => [entry, ...prev]);
+        notify(`${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}.`);
+      } catch (error) {
+        notify(`Clock event failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setOpsLoading(false);
+      }
+      return;
+    }
     setTimeEntries((prev) => [
       {
         id: makeId(),
@@ -1113,10 +1223,36 @@ function App() {
     notify(`${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}.`);
   }
 
-  function addFolder(): void {
+  async function addFolder(): Promise<void> {
     const name = newFolderName.trim();
     if (!name) {
       notify("Enter folder name.");
+      return;
+    }
+    if (hasSupabaseConfig && supabase) {
+      setOpsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("folders")
+          .insert({ name, parent_id: null })
+          .select("id,name,parent_id")
+          .single();
+        if (error) throw error;
+        const folder: FolderNode = {
+          id: data.id,
+          name: data.name,
+          parentId: data.parent_id,
+        };
+        setFolders((prev) => [folder, ...prev]);
+        setNewFolderName("");
+        if (!selectedFolderId) {
+          setSelectedFolderId(folder.id);
+        }
+      } catch (error) {
+        notify(`Add folder failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setOpsLoading(false);
+      }
       return;
     }
     const folder: FolderNode = {
@@ -1131,10 +1267,42 @@ function App() {
     }
   }
 
-  function addProjectFile(): void {
+  async function addProjectFile(): Promise<void> {
     const name = newFileName.trim();
     if (!name) {
       notify("Enter file name.");
+      return;
+    }
+    if (hasSupabaseConfig && supabase) {
+      setOpsLoading(true);
+      try {
+        const now = new Date().toISOString();
+        const { data, error } = await supabase
+          .from("project_files")
+          .insert({
+            folder_id: selectedFolderId,
+            name,
+            status: "Draft",
+            updated_at: now,
+          })
+          .select("id,folder_id,name,status,updated_at")
+          .single();
+        if (error) throw error;
+        const file: ProjectFile = {
+          id: data.id,
+          folderId: data.folder_id,
+          name: data.name,
+          status: data.status,
+          updatedAt: data.updated_at,
+        };
+        setProjectFiles((prev) => [file, ...prev]);
+        setNewFileName("");
+        notify(`Added file ${file.name}.`);
+      } catch (error) {
+        notify(`Add file failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setOpsLoading(false);
+      }
       return;
     }
     const file: ProjectFile = {
@@ -2221,6 +2389,10 @@ function App() {
       <main className="opsMain">
         <section className="opsCard">
           <h2>Workforce Clocking</h2>
+          <p className="opsBackendTag">
+            Backend: {hasSupabaseConfig ? "Supabase" : "Local Storage"}
+            {opsLoading ? " (syncing...)" : ""}
+          </p>
           <div className="opsInline">
             <input
               type="text"
@@ -2234,7 +2406,7 @@ function App() {
               value={newWorkerRole}
               onChange={(event) => setNewWorkerRole(event.target.value)}
             />
-            <button type="button" onClick={addWorker}>
+            <button type="button" onClick={() => void addWorker()} disabled={opsLoading}>
               Add Worker
             </button>
           </div>
@@ -2249,10 +2421,10 @@ function App() {
                     <small>{worker.role}</small>
                   </div>
                   <div className="opsInline">
-                    <button type="button" onClick={() => addTimeEntry(worker.id, "clock_in")}>
+                    <button type="button" onClick={() => void addTimeEntry(worker.id, "clock_in")} disabled={opsLoading}>
                       Clock In
                     </button>
-                    <button type="button" onClick={() => addTimeEntry(worker.id, "clock_out")}>
+                    <button type="button" onClick={() => void addTimeEntry(worker.id, "clock_out")} disabled={opsLoading}>
                       Clock Out
                     </button>
                   </div>
@@ -2271,7 +2443,7 @@ function App() {
               value={newFolderName}
               onChange={(event) => setNewFolderName(event.target.value)}
             />
-            <button type="button" onClick={addFolder}>
+            <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
               Add Folder
             </button>
           </div>
@@ -2303,7 +2475,7 @@ function App() {
                   value={newFileName}
                   onChange={(event) => setNewFileName(event.target.value)}
                 />
-                <button type="button" onClick={addProjectFile}>
+                <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
                   Add File
                 </button>
               </div>
