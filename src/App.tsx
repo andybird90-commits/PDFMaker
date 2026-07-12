@@ -47,6 +47,7 @@ type InteractionState =
 
 type PageSize = { width: number; height: number };
 type CustomStamp = { id: string; name: string; dataUrl: string };
+type BatchDocument = { id: string; name: string; bytes: Uint8Array; annotations: Annotation[] };
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
@@ -101,6 +102,8 @@ function App() {
   const [activeCustomStampId, setActiveCustomStampId] = useState<string>("");
   const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
   const [actionNotice, setActionNotice] = useState<string>("");
+  const [batchDocuments, setBatchDocuments] = useState<BatchDocument[]>([]);
+  const [activeBatchId, setActiveBatchId] = useState<string>("");
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -109,8 +112,10 @@ function App() {
   const zoomAnchorRef = useRef<{ mouseX: number; mouseY: number; contentX: number; contentY: number } | null>(null);
   const openInputRef = useRef<HTMLInputElement | null>(null);
   const loadMarkupInputRef = useRef<HTMLInputElement | null>(null);
+  const openBatchInputRef = useRef<HTMLInputElement | null>(null);
   const [isMiddlePanning, setIsMiddlePanning] = useState<boolean>(false);
   const panStateRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null);
+  const suppressBatchSyncRef = useRef<boolean>(false);
 
   const sortedAnnotations = useMemo(
     () => [...annotations].sort((a, b) => a.page - b.page),
@@ -161,6 +166,13 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STAMPS_STORAGE_KEY, JSON.stringify(customStamps));
   }, [customStamps]);
+
+  useEffect(() => {
+    if (!activeBatchId || suppressBatchSyncRef.current) return;
+    setBatchDocuments((prev) =>
+      prev.map((document) => (document.id === activeBatchId ? { ...document, annotations } : document)),
+    );
+  }, [annotations, activeBatchId]);
 
   function statusLabel(status: PinStatus): string {
     if (status === "in_progress") return "In progress";
@@ -288,8 +300,51 @@ function App() {
 
   async function handlePdfFile(file: File): Promise<void> {
     const data = new Uint8Array(await file.arrayBuffer());
+    const document: BatchDocument = {
+      id: makeId(),
+      name: file.name,
+      bytes: data,
+      annotations: [],
+    };
+    suppressBatchSyncRef.current = true;
+    setBatchDocuments([document]);
+    setActiveBatchId(document.id);
     await loadPdfBytes(data, file.name);
+    setAnnotations(document.annotations);
+    suppressBatchSyncRef.current = false;
+    setPdfFileHandle(null);
+  }
+
+  async function handleOpenBatch(files: FileList | null): Promise<void> {
+    if (!files || files.length === 0) return;
+    const batch = await Promise.all(
+      Array.from(files).map(async (file) => ({
+        id: makeId(),
+        name: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        annotations: [] as Annotation[],
+      })),
+    );
+    if (batch.length === 0) return;
+    suppressBatchSyncRef.current = true;
+    setBatchDocuments(batch);
+    setActiveBatchId(batch[0].id);
+    await loadPdfBytes(batch[0].bytes, batch[0].name);
     setAnnotations([]);
+    suppressBatchSyncRef.current = false;
+    setPdfFileHandle(null);
+    notify(`Loaded batch of ${batch.length} PDFs.`);
+  }
+
+  async function switchBatchDocument(documentId: string): Promise<void> {
+    const target = batchDocuments.find((document) => document.id === documentId);
+    if (!target || target.id === activeBatchId) return;
+    suppressBatchSyncRef.current = true;
+    setActiveBatchId(target.id);
+    await loadPdfBytes(target.bytes, target.name);
+    setAnnotations(target.annotations);
+    setSelectedId(null);
+    suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
   }
 
@@ -298,10 +353,21 @@ function App() {
       throw new Error("Invalid project file.");
     }
     const bytes = base64ToBytes(parsed.pdfData);
-    await loadPdfBytes(bytes, parsed.fileName || "project.pdf");
-    setAnnotations(
-      (parsed.annotations ?? []).map((annotation) => normalizeImportedAnnotation(annotation)),
+    const normalizedAnnotations = (parsed.annotations ?? []).map((annotation) =>
+      normalizeImportedAnnotation(annotation),
     );
+    const document: BatchDocument = {
+      id: makeId(),
+      name: parsed.fileName || "project.pdf",
+      bytes,
+      annotations: normalizedAnnotations,
+    };
+    suppressBatchSyncRef.current = true;
+    setBatchDocuments([document]);
+    setActiveBatchId(document.id);
+    await loadPdfBytes(bytes, document.name);
+    setAnnotations(normalizedAnnotations);
+    suppressBatchSyncRef.current = false;
   }
 
   async function handleOpenFile(file: File | null): Promise<"pdf" | "project" | "markups" | "unknown"> {
@@ -691,11 +757,6 @@ function App() {
     setScale(1.25);
   }
 
-  function closeAllMenus(): void {
-    const openMenus = document.querySelectorAll<HTMLDetailsElement>(".menuItem[open]");
-    openMenus.forEach((menu) => menu.removeAttribute("open"));
-  }
-
   function notify(message: string): void {
     setActionNotice(message);
     window.setTimeout(() => {
@@ -751,10 +812,6 @@ function App() {
     setActiveCustomStampId("");
   }
 
-  function triggerLoadMarkupsDialog(): void {
-    loadMarkupInputRef.current?.click();
-  }
-
   function applyPinStatus(status: PinStatus): void {
     updateSelectedAnnotation((annotation) =>
       annotation.type === "pin"
@@ -765,6 +822,76 @@ function App() {
           }
         : annotation,
     );
+  }
+
+  function rotatePoint(point: Point, center: Point, direction: "cw" | "ccw"): Point {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    if (direction === "cw") {
+      return { x: clamp01(center.x + dy), y: clamp01(center.y - dx) };
+    }
+    return { x: clamp01(center.x - dy), y: clamp01(center.y + dx) };
+  }
+
+  function rotateSelectedDrawing(direction: "cw" | "ccw"): void {
+    if (!selectedAnnotation) {
+      notify("Select an annotation to rotate.");
+      return;
+    }
+    updateSelectedAnnotation((annotation) => {
+      if (annotation.type === "line" || annotation.type === "arrow") {
+        const center = {
+          x: (annotation.start.x + annotation.end.x) / 2,
+          y: (annotation.start.y + annotation.end.y) / 2,
+        };
+        return {
+          ...annotation,
+          start: rotatePoint(annotation.start, center, direction),
+          end: rotatePoint(annotation.end, center, direction),
+        };
+      }
+      if (annotation.type === "rect" || annotation.type === "cloud") {
+        const corners = [
+          annotation.start,
+          { x: annotation.end.x, y: annotation.start.y },
+          annotation.end,
+          { x: annotation.start.x, y: annotation.end.y },
+        ];
+        const center = {
+          x: (annotation.start.x + annotation.end.x) / 2,
+          y: (annotation.start.y + annotation.end.y) / 2,
+        };
+        const rotated = corners.map((corner) => rotatePoint(corner, center, direction));
+        const xs = rotated.map((point) => point.x);
+        const ys = rotated.map((point) => point.y);
+        return {
+          ...annotation,
+          start: { x: Math.min(...xs), y: Math.min(...ys) },
+          end: { x: Math.max(...xs), y: Math.max(...ys) },
+        };
+      }
+      if (annotation.type === "highlighter") {
+        const xs = annotation.points.map((point) => point.x);
+        const ys = annotation.points.map((point) => point.y);
+        const center = {
+          x: (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+        return {
+          ...annotation,
+          points: annotation.points.map((point) => rotatePoint(point, center, direction)),
+        };
+      }
+      if (annotation.type === "stamp") {
+        return {
+          ...annotation,
+          width: annotation.height,
+          height: annotation.width,
+        };
+      }
+      return annotation;
+    });
+    notify(`Rotated ${selectedAnnotation.type} ${direction === "cw" ? "clockwise" : "counter-clockwise"}.`);
   }
 
   function saveMarkupJson(): void {
@@ -1551,102 +1678,39 @@ function App() {
     <div className="app">
       <header className="toolbar">
         {actionNotice ? <div className="actionNotice">{actionNotice}</div> : null}
-        <nav className="menuBar" aria-label="Application menu" onMouseLeave={closeAllMenus}>
-          <details className="menuItem" onMouseLeave={closeAllMenus}>
-            <summary>File</summary>
-            <div className="menuPanel">
-              <button type="button" onClick={() => { closeAllMenus(); void triggerOpenDialog(); }}>
-                Open...
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); void savePdf(); }} disabled={!pdfDoc}>
-                Save
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); void savePdfAs(); }} disabled={!pdfDoc}>
-                Save As...
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); triggerLoadMarkupsDialog(); }}>
-                Open Markups...
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); saveMarkupJson(); }} disabled={annotations.length === 0}>
-                Save Markups
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); void exportFlattenedPdf(); }} disabled={!pdfDoc}>
-                Export PDF
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); void exportAnnotatedPngs(); }} disabled={!pdfDoc}>
-                Export PNG
-              </button>
+        {batchDocuments.length > 1 ? (
+          <div className="batchBar">
+            <strong>Batch:</strong>
+            {batchDocuments.map((document, index) => (
               <button
+                key={document.id}
                 type="button"
-                onClick={() => { closeAllMenus(); exportPinsJson(); }}
-                disabled={!annotations.some((annotation) => annotation.type === "pin")}
+                className={document.id === activeBatchId ? "active" : ""}
+                onClick={() => void switchBatchDocument(document.id)}
               >
-                Export Pins JSON
+                {index + 1}. {document.name}
               </button>
-              <button
-                type="button"
-                onClick={() => { closeAllMenus(); exportPinsCsv(); }}
-                disabled={!annotations.some((annotation) => annotation.type === "pin")}
-              >
-                Export Pins CSV
-              </button>
-            </div>
-          </details>
-
-          <details className="menuItem" onMouseLeave={closeAllMenus}>
-            <summary>Edit</summary>
-            <div className="menuPanel">
-              <button type="button" onClick={() => { closeAllMenus(); undoLast(); }} disabled={annotations.length === 0}>
-                Undo
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); removeSelected(); }} disabled={!selectedId}>
-                Delete Selected
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); clearAll(); }} disabled={annotations.length === 0}>
-                Clear All
-              </button>
-            </div>
-          </details>
-
-          <details className="menuItem" onMouseLeave={closeAllMenus}>
-            <summary>View</summary>
-            <div className="menuPanel">
-              <button type="button" onClick={() => { closeAllMenus(); zoomIn(); }}>
-                Zoom In
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); zoomOut(); }}>
-                Zoom Out
-              </button>
-              <button type="button" onClick={() => { closeAllMenus(); zoomReset(); }}>
-                Reset Zoom
-              </button>
-            </div>
-          </details>
-
-          <details className="menuItem" onMouseLeave={closeAllMenus}>
-            <summary>Tools</summary>
-            <div className="menuPanel">
-              {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp", "pin"] as Tool[]).map((name) => (
-                <button
-                  key={`menu-${name}`}
-                  type="button"
-                  onClick={() => {
-                    closeAllMenus();
-                    setTool(name);
-                    setSelectedId(null);
-                  }}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          </details>
-        </nav>
+            ))}
+          </div>
+        ) : null}
 
         <div className="group">
           <button type="button" onClick={() => void triggerOpenDialog()}>
             Open
           </button>
+          <label className="uploadLabel">
+            Open Batch
+            <input
+              ref={openBatchInputRef}
+              type="file"
+              accept="application/pdf"
+              multiple
+              onChange={(event) => {
+                void handleOpenBatch(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
           <input
             ref={openInputRef}
             type="file"
@@ -1784,6 +1848,21 @@ function App() {
               onChange={(event) => setScale(Number(event.target.value))}
             />
           </label>
+          <button type="button" onClick={zoomOut}>
+            Zoom -
+          </button>
+          <button type="button" onClick={zoomIn}>
+            Zoom +
+          </button>
+          <button type="button" onClick={zoomReset}>
+            Zoom 100%
+          </button>
+          <button type="button" onClick={() => rotateSelectedDrawing("ccw")} disabled={!selectedAnnotation}>
+            Rotate Left
+          </button>
+          <button type="button" onClick={() => rotateSelectedDrawing("cw")} disabled={!selectedAnnotation}>
+            Rotate Right
+          </button>
         </div>
 
         <div className="group">
