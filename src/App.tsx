@@ -95,6 +95,7 @@ function App() {
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
   const pageRefs = useRef<Record<number, HTMLElement | null>>({});
   const pagesScrollRef = useRef<HTMLElement | null>(null);
+  const zoomAnchorRef = useRef<{ mouseX: number; mouseY: number; contentX: number; contentY: number } | null>(null);
   const openInputRef = useRef<HTMLInputElement | null>(null);
   const loadMarkupInputRef = useRef<HTMLInputElement | null>(null);
   const [isMiddlePanning, setIsMiddlePanning] = useState<boolean>(false);
@@ -192,6 +193,15 @@ function App() {
       cancelled = true;
     };
   }, [pdfDoc, pageCount]);
+
+  useEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    const container = pagesScrollRef.current;
+    if (!anchor || !container) return;
+    container.scrollLeft = Math.max(0, anchor.contentX * scale - anchor.mouseX);
+    container.scrollTop = Math.max(0, anchor.contentY * scale - anchor.mouseY);
+    zoomAnchorRef.current = null;
+  }, [scale]);
 
   async function loadPdfBytes(data: Uint8Array, fileName: string): Promise<void> {
     const loadingTask = getDocument({ data });
@@ -508,6 +518,17 @@ function App() {
   function onViewportWheel(event: React.WheelEvent<HTMLElement>): void {
     if (!pdfDoc) return;
     event.preventDefault();
+    event.stopPropagation();
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    zoomAnchorRef.current = {
+      mouseX,
+      mouseY,
+      contentX: (target.scrollLeft + mouseX) / scale,
+      contentY: (target.scrollTop + mouseY) / scale,
+    };
     const nextScale = scale - event.deltaY * 0.0012;
     setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale)));
   }
@@ -1469,7 +1490,7 @@ function App() {
             <section
               ref={pagesScrollRef}
               className={`pagesColumn ${isMiddlePanning ? "isPanning" : ""}`}
-              onWheel={onViewportWheel}
+              onWheelCapture={onViewportWheel}
               onMouseDown={onViewportMouseDown}
               onMouseMove={onViewportMouseMove}
               onMouseUp={endViewportPan}
