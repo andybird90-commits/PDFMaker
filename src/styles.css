@@ -532,6 +532,26 @@ label {
   color: #22c55e;
 }
 
+.opsProgressBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.opsProgressBar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+
+.opsProgressBar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #f97316, #22c55e);
+}
+
 .opsFolderGrid {
   display: grid;
   grid-template-columns: 130px 1fr;

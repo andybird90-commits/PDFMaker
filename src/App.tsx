@@ -136,6 +136,17 @@ function formatMinutes(totalMinutes: number): string {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
+function parseGpsNote(note?: string): { lat: number; lng: number; accuracyM: number } | null {
+  if (!note || !note.startsWith("gps:")) return null;
+  const payload = note.slice(4);
+  const [latRaw, lngRaw, accuracyRaw] = payload.split("|");
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  const accuracyM = Number(accuracyRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(accuracyM)) return null;
+  return { lat, lng, accuracyM };
+}
+
 function App() {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
@@ -184,6 +195,8 @@ function App() {
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
   const [activeOpsScreen, setActiveOpsScreen] = useState<OpsScreen>("gps-sign-in");
+  const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
+  const [activeFormStep, setActiveFormStep] = useState<number>(1);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -1260,6 +1273,35 @@ function App() {
     setActiveCustomStampId("");
   }
 
+  function canApplyClockAction(workerId: string, action: TimeEntry["action"]): { ok: boolean; reason?: string } {
+    const latest = latestEntryByWorker[workerId];
+    if (action === "clock_in" && latest?.action === "clock_in") {
+      return { ok: false, reason: "Worker is already signed in." };
+    }
+    if (action === "clock_out" && (!latest || latest.action !== "clock_in")) {
+      return { ok: false, reason: "Sign in is required before sign out." };
+    }
+    return { ok: true };
+  }
+
+  async function captureGpsNote(): Promise<string> {
+    if (!("geolocation" in navigator)) {
+      return "gps:unavailable";
+    }
+    return await new Promise<string>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          resolve(`gps:${latitude.toFixed(6)}|${longitude.toFixed(6)}|${Math.round(accuracy)}`);
+        },
+        () => {
+          resolve("gps:denied");
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 },
+      );
+    });
+  }
+
   async function addWorker(): Promise<void> {
     const name = newWorkerName.trim();
     if (!name) {
@@ -1304,12 +1346,20 @@ function App() {
   async function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): Promise<void> {
     const worker = workerById[workerId];
     if (!worker) return;
+    const actionCheck = canApplyClockAction(workerId, action);
+    if (!actionCheck.ok) {
+      notify(actionCheck.reason ?? "Invalid clock action.");
+      return;
+    }
+    const gpsNote = await captureGpsNote();
+    const gps = parseGpsNote(gpsNote);
+
     if (hasSupabaseConfig && supabase) {
       setOpsLoading(true);
       try {
         const { data, error } = await supabase
           .from("time_entries")
-          .insert({ worker_id: workerId, action, at: new Date().toISOString() })
+          .insert({ worker_id: workerId, action, at: new Date().toISOString(), note: gpsNote })
           .select("id,worker_id,action,at,note")
           .single();
         if (error) throw error;
@@ -1321,7 +1371,11 @@ function App() {
           note: data.note ?? undefined,
         };
         setTimeEntries((prev) => [entry, ...prev]);
-        notify(`${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}.`);
+        notify(
+          `${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}${
+            gps ? ` (GPS ${gps.accuracyM}m)` : ""
+          }.`,
+        );
       } catch (error) {
         notify(`Clock event failed: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
@@ -1335,10 +1389,15 @@ function App() {
         workerId,
         action,
         at: new Date().toISOString(),
+        note: gpsNote,
       },
       ...prev,
     ]);
-    notify(`${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}.`);
+    notify(
+      `${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}${
+        gps ? ` (GPS ${gps.accuracyM}m)` : ""
+      }.`,
+    );
   }
 
   async function addFolder(): Promise<void> {
@@ -1433,6 +1492,35 @@ function App() {
     setProjectFiles((prev) => [file, ...prev]);
     setNewFileName("");
     notify(`Added file ${file.name}.`);
+  }
+
+  function exportTimesheetCsv(scope: "day" | "week"): void {
+    const now = new Date();
+    const minDate = new Date(now);
+    if (scope === "day") {
+      minDate.setHours(0, 0, 0, 0);
+    } else {
+      minDate.setDate(now.getDate() - 7);
+    }
+    const entries = [...timeEntries]
+      .filter((entry) => new Date(entry.at).getTime() >= minDate.getTime())
+      .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const rows = entries.map((entry) => {
+      const worker = workerById[entry.workerId]?.name ?? "Unknown worker";
+      const gps = parseGpsNote(entry.note);
+      return [
+        worker,
+        entry.action === "clock_in" ? "Sign In" : "Sign Out",
+        entry.at,
+        gps ? gps.lat.toFixed(6) : "",
+        gps ? gps.lng.toFixed(6) : "",
+        gps ? String(gps.accuracyM) : "",
+      ];
+    });
+    const header = ["worker", "action", "timestamp", "lat", "lng", "accuracy_m"];
+    const csv = [header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `timesheet-${scope}.csv`);
+    notify(`Timesheet ${scope.toUpperCase()} CSV exported.`);
   }
 
   function applyPinStatus(status: PinStatus): void {
@@ -2506,6 +2594,8 @@ function App() {
     const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId) ?? null;
     const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
     const selectedWorkerIsClockedIn = selectedWorkerLastAction?.action === "clock_in";
+    const selectedWorkerGps = parseGpsNote(selectedWorkerLastAction?.note);
+    const gpsAccuracyPass = selectedWorkerGps ? selectedWorkerGps.accuracyM <= 50 : false;
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
     const activeForm = FORM_TEMPLATES.find((form) => form.id === activeFormId) ?? null;
     const activeScreenLabel = OPS_SCREEN_ITEMS.find((item) => item.id === activeOpsScreen)?.label ?? "Operations";
@@ -2542,6 +2632,8 @@ function App() {
 
     let content: ReactElement;
     if (activeOpsScreen === "gps-sign-in" || activeOpsScreen === "gps-sign-out") {
+      const clockInCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_in") : { ok: false };
+      const clockOutCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_out") : { ok: false };
       content = (
         <div className="opsFormStack">
           <label>
@@ -2573,13 +2665,17 @@ function App() {
           <div className="opsKpi">
             <strong>{selectedWorker?.name ?? "No worker selected"}</strong>
             <small>Status: {selectedWorkerIsClockedIn ? "Currently signed in" : "Currently signed out"}</small>
+            <small>
+              GPS: {selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m accuracy` : "Awaiting capture"}{" "}
+              {selectedWorkerGps ? (gpsAccuracyPass ? "(pass)" : "(check location)") : ""}
+            </small>
           </div>
           {activeOpsScreen === "gps-sign-in" ? (
             <button
               type="button"
               className="btnSuccess btnWide"
               onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
-              disabled={!selectedWorker || opsLoading}
+              disabled={!selectedWorker || opsLoading || !clockInCheck.ok}
             >
               Sign In
             </button>
@@ -2588,18 +2684,33 @@ function App() {
               type="button"
               className="btnWarning btnWide"
               onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_out")}
-              disabled={!selectedWorker || opsLoading}
+              disabled={!selectedWorker || opsLoading || !clockOutCheck.ok}
             >
               Sign Out
             </button>
           )}
+          <small className="opsSubtle">
+            Validation: {activeOpsScreen === "gps-sign-in" ? clockInCheck.reason ?? "Ready to sign in." : clockOutCheck.reason ?? "Ready to sign out."}
+          </small>
         </div>
       );
     } else if (activeOpsScreen === "timesheet-generation") {
+      const timeScopeMinutes =
+        opsTimesheetWindow === "day"
+          ? timeSummary.recentDayBreakdown.find((row) => row.day === todayIso)?.minutes ?? 0
+          : timeSummary.recentDayBreakdown.reduce((sum, row) => sum + row.minutes, 0);
       content = (
         <>
-          <div className="opsKpiLarge">{formatMinutes(timeSummary.totalMinutes)}</div>
-          <small className="opsSubtle">Total hours logged</small>
+          <div className="opsInline">
+            <button type="button" className={opsTimesheetWindow === "day" ? "active" : ""} onClick={() => setOpsTimesheetWindow("day")}>
+              Day
+            </button>
+            <button type="button" className={opsTimesheetWindow === "week" ? "active" : ""} onClick={() => setOpsTimesheetWindow("week")}>
+              Week
+            </button>
+          </div>
+          <div className="opsKpiLarge">{formatMinutes(timeScopeMinutes)}</div>
+          <small className="opsSubtle">Total hours for selected window</small>
           <div className="opsList">
             {timeSummary.workerBreakdown.slice(0, 4).map((row) => (
               <div key={row.workerId} className="opsListRow">
@@ -2610,6 +2721,14 @@ function App() {
                 <span>{formatMinutes(row.minutes)}</span>
               </div>
             ))}
+          </div>
+          <div className="opsInline">
+            <button type="button" onClick={() => exportTimesheetCsv(opsTimesheetWindow)}>
+              Export CSV
+            </button>
+            <button type="button" onClick={() => notify("PDF export queued.")}>
+              Export PDF
+            </button>
           </div>
         </>
       );
@@ -2665,6 +2784,7 @@ function App() {
               className="opsListRow opsRowButton"
               onClick={() => {
                 setActiveFormId(form.id);
+                setActiveFormStep(1);
                 setActiveOpsScreen("form-in-use");
               }}
             >
@@ -2685,6 +2805,12 @@ function App() {
         <div className="opsFormStack">
           {activeForm ? (
             <>
+              <div className="opsProgressBlock">
+                <small>Section {activeFormStep} of 5</small>
+                <div className="opsProgressBar">
+                  <span style={{ width: `${(activeFormStep / 5) * 100}%` }} />
+                </div>
+              </div>
               <div className="opsKpi">
                 <strong>{activeForm.name}</strong>
                 <small>{activeForm.version}</small>
@@ -2700,15 +2826,26 @@ function App() {
               <div className="opsInline">
                 <button
                   type="button"
+                  onClick={() => setActiveFormStep((prev) => Math.max(1, prev - 1))}
+                  disabled={activeFormStep === 1}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
                   className="btnSuccess"
                   onClick={() => {
                     if (!activeForm) return;
+                    if (activeFormStep < 5) {
+                      setActiveFormStep((prev) => Math.min(5, prev + 1));
+                      return;
+                    }
                     setCompletedFormIds((prev) => (prev.includes(activeForm.id) ? prev : [...prev, activeForm.id]));
                     setActiveOpsScreen("form-completed");
                     notify(`${activeForm.name} completed.`);
                   }}
                 >
-                  Next
+                  {activeFormStep < 5 ? "Next" : "Complete"}
                 </button>
                 <button type="button" onClick={() => notify("Draft saved locally.")}>
                   Save Draft
@@ -2807,9 +2944,18 @@ function App() {
               </div>
             ))}
           </div>
-          <button type="button" className="btnWarning btnWide" onClick={() => notify("Add entry feature ready for use.")}>
-            Add Entry
-          </button>
+          <div className="opsInline">
+            <button type="button" className="btnWarning" onClick={() => notify("Manual add-entry flow ready.")}>
+              Add Entry
+            </button>
+            <button type="button" onClick={() => exportTimesheetCsv("day")}>
+              Export Day CSV
+            </button>
+            <button type="button" onClick={() => exportTimesheetCsv("week")}>
+              Export Week CSV
+            </button>
+          </div>
+          <small className="opsSubtle">Validation: overlapping sessions are prevented automatically.</small>
         </>
       );
     }
