@@ -2100,7 +2100,9 @@ function App() {
           </div>
         ) : null}
 
-        <div className="group">
+        <div className="toolbarGrid">
+        <div className="group panel panel-files">
+          <span className="panelTitle">File</span>
           <button type="button" onClick={() => void triggerOpenDialog()}>
             Open
           </button>
@@ -2186,7 +2188,8 @@ function App() {
           </button>
         </div>
 
-        <div className="group">
+        <div className="group panel panel-tools">
+          <span className="panelTitle">Tools</span>
           {([
             "select",
             "line",
@@ -2214,7 +2217,8 @@ function App() {
           ))}
         </div>
 
-        <div className="group">
+        <div className="group panel panel-view">
+          <span className="panelTitle">View & Measure</span>
           <label>
             Line color
             <input type="color" value={strokeColor} onChange={(event) => setStrokeColor(event.target.value)} />
@@ -2305,7 +2309,8 @@ function App() {
           </button>
         </div>
 
-        <div className="group">
+        <div className="group panel panel-stamps">
+          <span className="panelTitle">Stamps</span>
           <label>
             Standard stamp
             <select
@@ -2380,7 +2385,8 @@ function App() {
           </label>
         </div>
 
-        <div className="group">
+        <div className="group panel panel-edit">
+          <span className="panelTitle">Edit</span>
           <button type="button" onClick={undoLast} disabled={annotations.length === 0}>
             Undo
           </button>
@@ -2393,7 +2399,8 @@ function App() {
         </div>
 
         {selectedAnnotation ? (
-          <div className="group">
+          <div className="group panel panel-selected">
+            <span className="panelTitle">Selected Annotation</span>
             <strong>Selected</strong>
             {selectedAnnotation.type !== "pin" ? (
               <>
@@ -2550,6 +2557,7 @@ function App() {
             )}
           </div>
         ) : null}
+        </div>
       </header>
 
       <main className="viewer">

@@ -29,6 +29,7 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - mobile pinch-to-zoom support
 - Bluebeam-inspired dark operator UI skin (toolbar + side rail)
 - Tool-first top ribbon (no dropdown menus)
+- Panel-based commercial toolbar layout with grouped controls
 - Styling controls:
   - line/highlighter color
   - line/highlighter weight

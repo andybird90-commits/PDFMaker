@@ -29,14 +29,17 @@ body {
 
 .toolbar {
   display: flex;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-  padding: 0.8rem;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem;
   border-bottom: 1px solid #323844;
-  background: linear-gradient(180deg, #242a34 0%, #1c212a 100%);
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.08), transparent 40%),
+    linear-gradient(180deg, #232a36 0%, #171d28 100%);
   position: sticky;
   top: 0;
   z-index: 3;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .actionNotice {
@@ -61,16 +64,37 @@ body {
   overflow-x: auto;
 }
 
-.group {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  padding-right: 0.7rem;
-  border-right: 1px solid #363c49;
+.toolbarGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.55rem;
 }
 
-.group:last-child {
-  border-right: none;
+.group {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.panel {
+  padding: 0.55rem;
+  border: 1px solid #364154;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(37, 46, 61, 0.9), rgba(27, 35, 49, 0.9));
+  min-height: 76px;
+  align-content: flex-start;
+}
+
+.panelTitle {
+  width: 100%;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #9caec7;
+  margin-bottom: 0.2rem;
 }
 
 button,
@@ -78,14 +102,28 @@ input[type="text"],
 select {
   border: 1px solid #444d5f;
   border-radius: 6px;
-  background: #202734;
+  background: #1f2735;
   color: #e5e7eb;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.85rem;
+  padding: 0.35rem 0.52rem;
+  font-size: 0.78rem;
+  min-height: 32px;
 }
 
 button {
   cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: #5b6780;
+  background: #2a3345;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 button.active {
@@ -100,15 +138,20 @@ button:disabled {
 }
 
 label {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   display: flex;
   gap: 0.3rem;
   align-items: center;
   color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.22rem 0.34rem;
+  border-radius: 6px;
+  border: 1px solid rgba(100, 116, 139, 0.3);
 }
 
 .uploadLabel input[type="file"] {
-  max-width: 12rem;
+  max-width: 9rem;
+  font-size: 0.7rem;
 }
 
 .hiddenInput {
@@ -138,7 +181,7 @@ label {
   max-height: calc(100vh - 110px);
   overflow-y: auto;
   position: sticky;
-  top: 92px;
+  top: 162px;
 }
 
 .thumbButton {
@@ -147,7 +190,7 @@ label {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
 }
 
 .thumbButton img {
@@ -190,7 +233,7 @@ label {
   border-radius: 12px;
   background: #f3f4f6;
   border: 1px solid #4b5563;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
 }
 
 .pageHeader {
@@ -233,6 +276,10 @@ label {
   object-fit: cover;
   border: 1px solid #64748b;
   border-radius: 6px;
+}
+
+.panel-selected {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 980px) {
