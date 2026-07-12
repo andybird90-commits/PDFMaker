@@ -225,6 +225,60 @@ label {
   gap: 0.9rem;
 }
 
+.opsScreenStrip {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.opsScreenStrip button {
+  white-space: nowrap;
+  border-radius: 999px;
+  border-color: #294a6c;
+  background: rgba(14, 32, 53, 0.85);
+  color: #b4c8e2;
+}
+
+.opsScreenStrip button.active {
+  background: #f97316;
+  border-color: #f97316;
+  color: #172033;
+}
+
+.opsPhoneStage {
+  display: flex;
+  justify-content: center;
+}
+
+.opsMobilePhone {
+  width: min(390px, 100%);
+  min-height: 720px;
+  border-radius: 26px;
+  border: 1px solid #23405f;
+  background: linear-gradient(180deg, #071526 0%, #0b1d31 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.opsPhoneStatus {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #9bb0cc;
+  padding: 0 0.2rem;
+}
+
+.opsPhoneBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .opsRibbon {
   display: flex;
   flex-wrap: wrap;
@@ -279,8 +333,13 @@ label {
 
 .opsPhoneHeader h3 {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 1rem;
   color: #f1f5f9;
+}
+
+.opsPhoneHeader small {
+  color: #8fa5c0;
+  font-size: 0.74rem;
 }
 
 .opsBackendTag {
@@ -406,6 +465,31 @@ label {
   color: #1f2937;
 }
 
+.opsAppBottomNav {
+  margin-top: auto;
+  border-top: 1px solid rgba(49, 74, 104, 0.55);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding-top: 0.45rem;
+}
+
+.opsAppBottomNav button {
+  min-height: 30px;
+  padding: 0.2rem 0.3rem;
+  border-radius: 7px;
+  font-size: 0.64rem;
+  background: rgba(15, 23, 42, 0.6);
+  color: #97abc4;
+  border-color: #2f4f70;
+}
+
+.opsAppBottomNav button.active {
+  background: #f97316;
+  border-color: #f97316;
+  color: #182231;
+}
+
 .btnSuccess {
   background: #16a34a;
   border-color: #16a34a;
@@ -421,6 +505,31 @@ label {
 .btnSuccess:hover:not(:disabled),
 .btnWarning:hover:not(:disabled) {
   filter: brightness(1.06);
+}
+
+.btnWide {
+  width: 100%;
+}
+
+.opsCentered {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.opsSuccessCircle {
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  border: 3px solid #22c55e;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #22c55e;
 }
 
 .opsFolderGrid {
