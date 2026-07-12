@@ -630,10 +630,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isOpsPath(opsPathname)) {
+    if (isOpsPath(opsPathname) && !projectEditorContext) {
       setActiveModule("operations");
     }
-  }, [opsPathname]);
+  }, [opsPathname, projectEditorContext]);
 
   useEffect(() => {
     if (activeModule !== "operations") return;
@@ -2331,6 +2331,11 @@ function App() {
       notify("You do not have permission to use PDF markup.");
       return;
     }
+    setProjectEditorContext({
+      projectId: selectedProjectId,
+      fileId: file.id,
+      fileName: file.name,
+    });
     const targetPath = `/projects/${projectSlug}/files/${encodeURIComponent(file.id)}`;
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, "", targetPath);
