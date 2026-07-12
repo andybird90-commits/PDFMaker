@@ -902,9 +902,19 @@ function App() {
     return normalized.buffer;
   }
 
-  async function buildFlattenedPdfBytes(): Promise<Uint8Array | null> {
+  async function getSourcePdfBytes(): Promise<Uint8Array | null> {
+    if (pdfDoc) {
+      const docBytes = await pdfDoc.getData();
+      return new Uint8Array(docBytes);
+    }
     if (!pdfBytes) return null;
-    const output = await PDFDocument.load(pdfBytes);
+    return new Uint8Array(pdfBytes);
+  }
+
+  async function buildFlattenedPdfBytes(): Promise<Uint8Array | null> {
+    const sourceBytes = await getSourcePdfBytes();
+    if (!sourceBytes) return null;
+    const output = await PDFDocument.load(sourceBytes);
     const pages = output.getPages();
     const imageCache = new Map<string, Awaited<ReturnType<typeof output.embedPng>>>();
 
