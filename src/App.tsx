@@ -17,6 +17,7 @@ import type {
   EditorProjectDocument,
   LineStyle,
   MarkupDocument,
+  MeasureAnnotation,
   PinStatus,
   Point,
   StampAnnotation,
@@ -47,7 +48,13 @@ type InteractionState =
 
 type PageSize = { width: number; height: number };
 type CustomStamp = { id: string; name: string; dataUrl: string };
-type BatchDocument = { id: string; name: string; bytes: Uint8Array; annotations: Annotation[] };
+type BatchDocument = {
+  id: string;
+  name: string;
+  bytes: Uint8Array;
+  annotations: Annotation[];
+  calibrationByPage: Record<number, number>;
+};
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
@@ -102,6 +109,7 @@ function App() {
   const [activeCustomStampId, setActiveCustomStampId] = useState<string>("");
   const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
   const [actionNotice, setActionNotice] = useState<string>("");
+  const [calibrationByPage, setCalibrationByPage] = useState<Record<number, number>>({});
   const [batchDocuments, setBatchDocuments] = useState<BatchDocument[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string>("");
 
@@ -144,6 +152,8 @@ function App() {
     () => customStamps.find((stamp) => stamp.id === activeCustomStampId) ?? null,
     [customStamps, activeCustomStampId],
   );
+  const activePageForTools = selectedAnnotation?.page ?? 1;
+  const activeCalibration = calibrationByPage[activePageForTools];
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -170,9 +180,11 @@ function App() {
   useEffect(() => {
     if (!activeBatchId || suppressBatchSyncRef.current) return;
     setBatchDocuments((prev) =>
-      prev.map((document) => (document.id === activeBatchId ? { ...document, annotations } : document)),
+      prev.map((document) =>
+        document.id === activeBatchId ? { ...document, annotations, calibrationByPage } : document,
+      ),
     );
-  }, [annotations, activeBatchId]);
+  }, [annotations, calibrationByPage, activeBatchId]);
 
   function statusLabel(status: PinStatus): string {
     if (status === "in_progress") return "In progress";
@@ -193,6 +205,16 @@ function App() {
       ...annotation,
       lineStyle: annotation.lineStyle ?? "solid",
     };
+  }
+
+  function normalizedDistance(a: Point, b: Point): number {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function calibrationFactorForPage(page: number): number | null {
+    return calibrationByPage[page] ?? null;
   }
 
   useEffect(() => {
@@ -305,12 +327,14 @@ function App() {
       name: file.name,
       bytes: data,
       annotations: [],
+      calibrationByPage: {},
     };
     suppressBatchSyncRef.current = true;
     setBatchDocuments([document]);
     setActiveBatchId(document.id);
     await loadPdfBytes(data, file.name);
     setAnnotations(document.annotations);
+    setCalibrationByPage({});
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
   }
@@ -323,6 +347,7 @@ function App() {
         name: file.name,
         bytes: new Uint8Array(await file.arrayBuffer()),
         annotations: [] as Annotation[],
+        calibrationByPage: {},
       })),
     );
     if (batch.length === 0) return;
@@ -331,6 +356,7 @@ function App() {
     setActiveBatchId(batch[0].id);
     await loadPdfBytes(batch[0].bytes, batch[0].name);
     setAnnotations([]);
+    setCalibrationByPage(batch[0].calibrationByPage);
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
     notify(`Loaded batch of ${batch.length} PDFs.`);
@@ -343,6 +369,7 @@ function App() {
     setActiveBatchId(target.id);
     await loadPdfBytes(target.bytes, target.name);
     setAnnotations(target.annotations);
+    setCalibrationByPage(target.calibrationByPage);
     setSelectedId(null);
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
@@ -361,12 +388,14 @@ function App() {
       name: parsed.fileName || "project.pdf",
       bytes,
       annotations: normalizedAnnotations,
+      calibrationByPage: parsed.calibrationByPage ?? {},
     };
     suppressBatchSyncRef.current = true;
     setBatchDocuments([document]);
     setActiveBatchId(document.id);
     await loadPdfBytes(bytes, document.name);
     setAnnotations(normalizedAnnotations);
+    setCalibrationByPage(document.calibrationByPage);
     suppressBatchSyncRef.current = false;
   }
 
@@ -386,6 +415,7 @@ function App() {
       setAnnotations(
         (parsed as MarkupDocument).annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
       );
+      setCalibrationByPage((parsed as MarkupDocument).calibrationByPage ?? {});
       setSelectedId(null);
       return "markups";
     }
@@ -469,13 +499,21 @@ function App() {
   }
 
   function resizeAnnotation(annotation: Annotation, pointer: Point, handle: string): Annotation {
-    if (annotation.type === "line" || annotation.type === "arrow") {
+    if (
+      annotation.type === "line" ||
+      annotation.type === "arrow" ||
+      (annotation.type === "measure" && annotation.measureKind === "distance")
+    ) {
       if (handle === "start") return { ...annotation, start: pointer };
       if (handle === "end") return { ...annotation, end: pointer };
       return annotation;
     }
 
-    if (annotation.type === "rect" || annotation.type === "cloud") {
+    if (
+      annotation.type === "rect" ||
+      annotation.type === "cloud" ||
+      (annotation.type === "measure" && annotation.measureKind === "area")
+    ) {
       const start = annotation.start;
       const end = annotation.end;
       if (handle === "nw") return { ...annotation, start: pointer, end };
@@ -641,6 +679,61 @@ function App() {
         opacity: 0.35,
         points: drawingState.points.map((p) => normalizePoint(p, size.width, size.height)),
       });
+    } else if (tool === "calibrate") {
+      const distance = normalizedDistance(start, end);
+      if (distance <= 0.0001) {
+        notify("Calibration line too short.");
+      } else {
+        const entered = window.prompt("Known length in millimeters (mm):", "1000");
+        if (entered && !Number.isNaN(Number(entered))) {
+          const knownMm = Number(entered);
+          if (knownMm > 0) {
+            const mmPerUnit = knownMm / distance;
+            setCalibrationByPage((prev) => ({ ...prev, [page]: mmPerUnit }));
+            notify(`Calibrated page ${page}: ${knownMm} mm.`);
+          }
+        }
+      }
+    } else if (tool === "measure-distance") {
+      const factor = calibrationFactorForPage(page);
+      if (!factor) {
+        notify("Calibrate this page first (mm).");
+      } else {
+        const distanceMm = normalizedDistance(start, end) * factor;
+        const label = `${distanceMm.toFixed(1)} mm`;
+        const measure: MeasureAnnotation = {
+          ...shared,
+          type: "measure",
+          measureKind: "distance",
+          start,
+          end,
+          label,
+          valueMm: distanceMm,
+        };
+        addAnnotation(measure);
+      }
+    } else if (tool === "measure-area") {
+      const factor = calibrationFactorForPage(page);
+      if (!factor) {
+        notify("Calibrate this page first (mm).");
+      } else {
+        const widthUnits = Math.abs(end.x - start.x);
+        const heightUnits = Math.abs(end.y - start.y);
+        const widthMm = widthUnits * factor;
+        const heightMm = heightUnits * factor;
+        const areaMm2 = widthMm * heightMm;
+        const label = `${areaMm2.toFixed(1)} mm²`;
+        const measure: MeasureAnnotation = {
+          ...shared,
+          type: "measure",
+          measureKind: "area",
+          start,
+          end,
+          label,
+          areaMm2,
+        };
+        addAnnotation(measure);
+      }
     }
     setDrawingState(null);
     setInteraction(null);
@@ -839,7 +932,11 @@ function App() {
       return;
     }
     updateSelectedAnnotation((annotation) => {
-      if (annotation.type === "line" || annotation.type === "arrow") {
+      if (
+        annotation.type === "line" ||
+        annotation.type === "arrow" ||
+        (annotation.type === "measure" && annotation.measureKind === "distance")
+      ) {
         const center = {
           x: (annotation.start.x + annotation.end.x) / 2,
           y: (annotation.start.y + annotation.end.y) / 2,
@@ -850,7 +947,11 @@ function App() {
           end: rotatePoint(annotation.end, center, direction),
         };
       }
-      if (annotation.type === "rect" || annotation.type === "cloud") {
+      if (
+        annotation.type === "rect" ||
+        annotation.type === "cloud" ||
+        (annotation.type === "measure" && annotation.measureKind === "area")
+      ) {
         const corners = [
           annotation.start,
           { x: annotation.end.x, y: annotation.start.y },
@@ -900,6 +1001,7 @@ function App() {
       fileName: pdfName,
       createdAt: new Date().toISOString(),
       annotations: sortedAnnotations,
+      calibrationByPage,
     };
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
     downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.markups.json`);
@@ -915,6 +1017,7 @@ function App() {
     setAnnotations(
       parsed.annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
     );
+    setCalibrationByPage(parsed.calibrationByPage ?? {});
     setSelectedId(null);
   }
 
@@ -1138,6 +1241,50 @@ function App() {
           continue;
         }
 
+        if (annotation.type === "measure") {
+          const start = toPdfPoint(annotation.start, width, height);
+          const end = toPdfPoint(annotation.end, width, height);
+          const measureColor = rgb(0.64, 0.9, 0.2);
+          if (annotation.measureKind === "distance") {
+            page.drawLine({
+              start,
+              end,
+              color: measureColor,
+              thickness: Math.max(1, annotation.strokeWidth),
+              dashArray: [4, 3],
+            });
+            page.drawText(annotation.label, {
+              x: (start.x + end.x) / 2,
+              y: (start.y + end.y) / 2 + 5,
+              size: 9,
+              color: measureColor,
+            });
+          } else {
+            const x = Math.min(start.x, end.x);
+            const y = Math.min(start.y, end.y);
+            const w = Math.max(1, Math.abs(end.x - start.x));
+            const h = Math.max(1, Math.abs(end.y - start.y));
+            page.drawRectangle({
+              x,
+              y,
+              width: w,
+              height: h,
+              borderColor: measureColor,
+              borderWidth: Math.max(1, annotation.strokeWidth),
+              borderDashArray: [4, 3],
+              color: rgb(1, 1, 1),
+              opacity: 0,
+            });
+            page.drawText(annotation.label, {
+              x: x + w / 2 - 20,
+              y: y + h / 2,
+              size: 9,
+              color: measureColor,
+            });
+          }
+          continue;
+        }
+
         if (annotation.type === "stamp") {
           const center = toPdfPoint(annotation.position, width, height);
           const stampWidth = annotation.width * width;
@@ -1353,6 +1500,14 @@ function App() {
                 position: movePoint(initial.position, dx, dy),
               };
             }
+            if (annotation.type === "measure") {
+              if (initial.type !== "measure") return annotation;
+              return {
+                ...annotation,
+                start: movePoint(initial.start, dx, dy),
+                end: movePoint(initial.end, dx, dy),
+              };
+            }
           }
           if (interaction.mode === "resize" && interaction.handle) {
             return resizeAnnotation(annotation, currentNorm, interaction.handle);
@@ -1465,6 +1620,76 @@ function App() {
       );
     }
 
+    if (annotation.type === "measure") {
+      const start = denormalizePoint(annotation.start, size.width, size.height);
+      const end = denormalizePoint(annotation.end, size.width, size.height);
+      if (annotation.measureKind === "distance") {
+        const midX = (start.x + end.x) / 2;
+        const midY = (start.y + end.y) / 2;
+        return (
+          <g key={annotation.id}>
+            <line
+              x1={start.x}
+              y1={start.y}
+              x2={end.x}
+              y2={end.y}
+              stroke="#a3e635"
+              strokeDasharray="6 4"
+              strokeWidth={selected ? annotation.strokeWidth + 1 : annotation.strokeWidth}
+              onClick={commonProps.onClick}
+              onPointerDown={commonProps.onPointerDown}
+              style={commonProps.style}
+            />
+            <text
+              x={midX}
+              y={midY - 6}
+              textAnchor="middle"
+              fontSize={12}
+              fontWeight={700}
+              fill="#a3e635"
+              onClick={commonProps.onClick}
+              style={commonProps.style}
+            >
+              {annotation.label}
+            </text>
+          </g>
+        );
+      }
+      const rect = rectFromPoints(start, end);
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      return (
+        <g key={annotation.id}>
+          <rect
+            x={rect.x}
+            y={rect.y}
+            width={Math.max(2, rect.w)}
+            height={Math.max(2, rect.h)}
+            fill="rgba(163,230,53,0.05)"
+            stroke="#a3e635"
+            strokeDasharray="6 4"
+            strokeWidth={selected ? annotation.strokeWidth + 1 : annotation.strokeWidth}
+            onClick={commonProps.onClick}
+            onPointerDown={commonProps.onPointerDown}
+            style={commonProps.style}
+          />
+          <text
+            x={cx}
+            y={cy}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={12}
+            fontWeight={700}
+            fill="#a3e635"
+            onClick={commonProps.onClick}
+            style={commonProps.style}
+          >
+            {annotation.label}
+          </text>
+        </g>
+      );
+    }
+
     if (annotation.type === "stamp") {
       const position = denormalizePoint(annotation.position, size.width, size.height);
       const width = annotation.width * size.width;
@@ -1560,7 +1785,11 @@ function App() {
     if (!size) return null;
 
     const handles: Array<{ key: string; point: Point }> = [];
-    if (annotation.type === "line" || annotation.type === "arrow") {
+    if (
+      annotation.type === "line" ||
+      annotation.type === "arrow" ||
+      (annotation.type === "measure" && annotation.measureKind === "distance")
+    ) {
       handles.push({
         key: "start",
         point: denormalizePoint(annotation.start, size.width, size.height),
@@ -1569,7 +1798,11 @@ function App() {
         key: "end",
         point: denormalizePoint(annotation.end, size.width, size.height),
       });
-    } else if (annotation.type === "rect" || annotation.type === "cloud") {
+    } else if (
+      annotation.type === "rect" ||
+      annotation.type === "cloud" ||
+      (annotation.type === "measure" && annotation.measureKind === "area")
+    ) {
       const start = denormalizePoint(annotation.start, size.width, size.height);
       const end = denormalizePoint(annotation.end, size.width, size.height);
       const rect = rectFromPoints(start, end);
@@ -1614,15 +1847,17 @@ function App() {
     const start = drawingState.start;
     const current = drawingState.current;
 
-    if (tool === "line" || tool === "arrow") {
+    if (tool === "line" || tool === "arrow" || tool === "calibrate" || tool === "measure-distance") {
       return (
         <line
           x1={start.x}
           y1={start.y}
           x2={current.x}
           y2={current.y}
-          stroke={strokeColor}
-          strokeDasharray={lineStyleToDash(lineStyle, strokeWidth)}
+          stroke={tool === "calibrate" ? "#22d3ee" : tool === "measure-distance" ? "#a3e635" : strokeColor}
+          strokeDasharray={
+            tool === "calibrate" || tool === "measure-distance" ? "6 4" : lineStyleToDash(lineStyle, strokeWidth)
+          }
           strokeWidth={strokeWidth}
           markerEnd={tool === "arrow" ? `url(#arrow-${page})` : undefined}
           pointerEvents="none"
@@ -1630,7 +1865,7 @@ function App() {
       );
     }
 
-    if (tool === "rect") {
+    if (tool === "rect" || tool === "measure-area") {
       const rect = rectFromPoints(start, current);
       return (
         <rect
@@ -1639,8 +1874,8 @@ function App() {
           width={rect.w}
           height={rect.h}
           fill="transparent"
-          stroke={strokeColor}
-          strokeDasharray={lineStyleToDash(lineStyle, strokeWidth)}
+          stroke={tool === "measure-area" ? "#a3e635" : strokeColor}
+          strokeDasharray={tool === "measure-area" ? "6 4" : lineStyleToDash(lineStyle, strokeWidth)}
           strokeWidth={strokeWidth}
           pointerEvents="none"
         />
@@ -1781,7 +2016,19 @@ function App() {
         </div>
 
         <div className="group">
-          {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp", "pin"] as Tool[]).map((name) => (
+          {([
+            "select",
+            "line",
+            "arrow",
+            "rect",
+            "cloud",
+            "highlighter",
+            "stamp",
+            "pin",
+            "calibrate",
+            "measure-distance",
+            "measure-area",
+          ] as Tool[]).map((name) => (
             <button
               key={name}
               type="button"
@@ -1857,6 +2104,22 @@ function App() {
           <button type="button" onClick={zoomReset}>
             Zoom 100%
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!activeCalibration) return;
+              setCalibrationByPage((prev) => {
+                const next = { ...prev };
+                delete next[activePageForTools];
+                return next;
+              });
+              notify(`Cleared calibration for page ${activePageForTools}.`);
+            }}
+            disabled={!activeCalibration}
+          >
+            Clear Calib
+          </button>
+          <span>{activeCalibration ? `Calib p${activePageForTools}: ${activeCalibration.toFixed(1)} mm/unit` : "Not calibrated"}</span>
           <button type="button" onClick={() => rotateSelectedDrawing("ccw")} disabled={!selectedAnnotation}>
             Rotate Left
           </button>

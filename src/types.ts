@@ -6,7 +6,10 @@ export type Tool =
   | "cloud"
   | "highlighter"
   | "stamp"
-  | "pin";
+  | "pin"
+  | "calibrate"
+  | "measure-distance"
+  | "measure-area";
 
 export type Point = {
   x: number;
@@ -74,19 +77,31 @@ export type PinAnnotation = BaseAnnotation & {
   createdAt: string;
 };
 
+export type MeasureAnnotation = BaseAnnotation & {
+  type: "measure";
+  measureKind: "distance" | "area";
+  start: NormalizedPoint;
+  end: NormalizedPoint;
+  label: string;
+  valueMm?: number;
+  areaMm2?: number;
+};
+
 export type Annotation =
   | LineAnnotation
   | RectAnnotation
   | CloudAnnotation
   | HighlighterAnnotation
   | StampAnnotation
-  | PinAnnotation;
+  | PinAnnotation
+  | MeasureAnnotation;
 
 export type MarkupDocument = {
   schemaVersion: 1;
   fileName: string;
   createdAt: string;
   annotations: Annotation[];
+  calibrationByPage?: Record<number, number>;
 };
 
 export type EditorProjectDocument = {
@@ -96,4 +111,5 @@ export type EditorProjectDocument = {
   createdAt: string;
   pdfData: string;
   annotations: Annotation[];
+  calibrationByPage?: Record<number, number>;
 };
