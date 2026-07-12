@@ -61,17 +61,12 @@ type TimeEntry = {
 type FolderNode = { id: string; name: string; parentId: string | null };
 type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
 type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
-type OpsScreen =
-  | "gps-sign-in"
-  | "gps-sign-out"
-  | "timesheet-generation"
-  | "project-files"
-  | "forms-library"
-  | "form-in-use"
-  | "form-completed"
-  | "export-form"
-  | "project-dashboard"
-  | "timesheet-view";
+type OpsRoute =
+  | { name: "sign-in" }
+  | { name: "sign-out" }
+  | { name: "timesheets"; date?: string }
+  | { name: "projects"; projectId?: string; section?: "files" }
+  | { name: "forms"; formId?: string; submissionId?: string; mode?: "fill" | "view" | "export" };
 type BatchDocument = {
   id: string;
   name: string;
@@ -109,18 +104,6 @@ const FORM_TEMPLATES: FormTemplate[] = [
   { id: "materials-delivery", name: "Materials Delivery", version: "v1.2", updatedAt: "10/06/2025" },
   { id: "handover-checklist", name: "Handover Checklist", version: "v1.1", updatedAt: "05/06/2025" },
 ];
-const OPS_SCREEN_ITEMS: Array<{ id: OpsScreen; label: string }> = [
-  { id: "gps-sign-in", label: "1. GPS Sign In" },
-  { id: "gps-sign-out", label: "2. GPS Sign Out" },
-  { id: "timesheet-generation", label: "3. Timesheet Generation" },
-  { id: "project-files", label: "4. Project Files" },
-  { id: "forms-library", label: "5. Forms Library" },
-  { id: "form-in-use", label: "6. Form In Use" },
-  { id: "form-completed", label: "7. Form Completed" },
-  { id: "export-form", label: "8. Export Form" },
-  { id: "project-dashboard", label: "9. Project Dashboard" },
-  { id: "timesheet-view", label: "10. Timesheet View" },
-];
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -145,6 +128,43 @@ function parseGpsNote(note?: string): { lat: number; lng: number; accuracyM: num
   const accuracyM = Number(accuracyRaw);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(accuracyM)) return null;
   return { lat, lng, accuracyM };
+}
+
+function isOpsPath(pathname: string): boolean {
+  return (
+    pathname === "/sign-in" ||
+    pathname === "/sign-out" ||
+    pathname === "/timesheets" ||
+    /^\/timesheets\/[^/]+$/.test(pathname) ||
+    pathname === "/projects" ||
+    /^\/projects\/[^/]+$/.test(pathname) ||
+    /^\/projects\/[^/]+\/files$/.test(pathname) ||
+    pathname === "/forms" ||
+    /^\/forms\/[^/]+\/fill$/.test(pathname) ||
+    /^\/forms\/submissions\/[^/]+$/.test(pathname) ||
+    /^\/forms\/submissions\/[^/]+\/export$/.test(pathname)
+  );
+}
+
+function parseOpsRoute(pathname: string): OpsRoute {
+  if (pathname === "/sign-out") return { name: "sign-out" };
+  if (pathname === "/timesheets") return { name: "timesheets" };
+  if (pathname.startsWith("/timesheets/")) return { name: "timesheets", date: pathname.split("/")[2] };
+  if (pathname === "/projects") return { name: "projects" };
+  if (/^\/projects\/[^/]+\/files$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "files" };
+  }
+  if (/^\/projects\/[^/]+$/.test(pathname)) return { name: "projects", projectId: pathname.split("/")[2] };
+  if (pathname === "/forms") return { name: "forms" };
+  if (/^\/forms\/[^/]+\/fill$/.test(pathname)) return { name: "forms", formId: pathname.split("/")[2], mode: "fill" };
+  if (/^\/forms\/submissions\/[^/]+\/export$/.test(pathname)) {
+    return { name: "forms", submissionId: pathname.split("/")[3], mode: "export" };
+  }
+  if (/^\/forms\/submissions\/[^/]+$/.test(pathname)) {
+    return { name: "forms", submissionId: pathname.split("/")[3], mode: "view" };
+  }
+  return { name: "sign-in" };
 }
 
 function App() {
@@ -194,7 +214,7 @@ function App() {
   const [fileSearch, setFileSearch] = useState<string>("");
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
-  const [activeOpsScreen, setActiveOpsScreen] = useState<OpsScreen>("gps-sign-in");
+  const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/sign-in");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
 
@@ -316,17 +336,6 @@ function App() {
       recentDayBreakdown,
     };
   }, [timeEntries, workerById]);
-  const projectStats = useMemo(() => {
-    const openPins = annotations.filter((annotation) => annotation.type === "pin" && annotation.status !== "closed").length;
-    return {
-      totalFiles: projectFiles.length,
-      totalForms: FORM_TEMPLATES.length,
-      totalWorkers: workers.length,
-      totalHoursMinutes: timeSummary.totalMinutes,
-      openPins,
-    };
-  }, [annotations, projectFiles.length, workers.length, timeSummary.totalMinutes]);
-
   useEffect(() => {
     if (workers.length === 0) {
       setSelectedWorkerId("");
@@ -337,6 +346,20 @@ function App() {
       setSelectedWorkerId(workers[0].id);
     }
   }, [workers, selectedWorkerId]);
+
+  useEffect(() => {
+    function handlePopState(): void {
+      setOpsPathname(window.location.pathname || "/sign-in");
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (isOpsPath(opsPathname)) {
+      setActiveModule("operations");
+    }
+  }, [opsPathname]);
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -1523,6 +1546,14 @@ function App() {
     notify(`Timesheet ${scope.toUpperCase()} CSV exported.`);
   }
 
+  function navigateOps(path: string): void {
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, "", path);
+    }
+    setOpsPathname(path);
+    setActiveModule("operations");
+  }
+
   function applyPinStatus(status: PinStatus): void {
     updateSelectedAnnotation((annotation) =>
       annotation.type === "pin"
@@ -2591,153 +2622,174 @@ function App() {
   }
 
   function renderOperationsModule(): ReactElement {
+    const route = parseOpsRoute(opsPathname);
     const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId) ?? null;
-    const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
-    const selectedWorkerIsClockedIn = selectedWorkerLastAction?.action === "clock_in";
-    const selectedWorkerGps = parseGpsNote(selectedWorkerLastAction?.note);
-    const gpsAccuracyPass = selectedWorkerGps ? selectedWorkerGps.accuracyM <= 50 : false;
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
-    const activeForm = FORM_TEMPLATES.find((form) => form.id === activeFormId) ?? null;
-    const activeScreenLabel = OPS_SCREEN_ITEMS.find((item) => item.id === activeOpsScreen)?.label ?? "Operations";
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const todayMinutes = timeSummary.recentDayBreakdown.find((day) => day.day === todayIso)?.minutes ?? 0;
+    const currentFormId = route.name === "forms" ? route.formId : undefined;
+    const activeForm = FORM_TEMPLATES.find((form) => form.id === (currentFormId ?? activeFormId ?? "")) ?? null;
+    const signedInWorkers = workers
+      .map((worker) => ({
+        worker,
+        lastEntry: latestEntryByWorker[worker.id],
+      }))
+      .filter((item) => item.lastEntry?.action === "clock_in");
+    const activeNav = route.name === "projects" ? "projects" : route.name === "timesheets" ? "timesheets" : route.name === "forms" ? "forms" : "home";
 
-    const renderBottomNav = (): ReactElement => (
-      <nav className="opsAppBottomNav" aria-label="Mobile app navigation">
-        <button type="button" className={activeOpsScreen === "gps-sign-in" ? "active" : ""} onClick={() => setActiveOpsScreen("gps-sign-in")}>
-          Home
-        </button>
-        <button type="button" className={activeOpsScreen === "project-files" ? "active" : ""} onClick={() => setActiveOpsScreen("project-files")}>
-          Projects
-        </button>
-        <button
-          type="button"
-          className={activeOpsScreen === "timesheet-generation" || activeOpsScreen === "timesheet-view" ? "active" : ""}
-          onClick={() => setActiveOpsScreen("timesheet-view")}
-        >
-          Timesheet
-        </button>
-        <button
-          type="button"
-          className={activeOpsScreen === "forms-library" || activeOpsScreen === "form-in-use" ? "active" : ""}
-          onClick={() => setActiveOpsScreen("forms-library")}
-        >
-          Forms
-        </button>
-        <button type="button" className={activeOpsScreen === "project-dashboard" ? "active" : ""} onClick={() => setActiveOpsScreen("project-dashboard")}>
-          More
-        </button>
-      </nav>
-    );
+    const navItems = [
+      { key: "home", label: "Home", path: "/sign-in" },
+      { key: "projects", label: "Projects", path: "/projects" },
+      { key: "timesheets", label: "Timesheets", path: "/timesheets" },
+      { key: "forms", label: "Forms", path: "/forms" },
+      { key: "more", label: "More", path: "/sign-out" },
+    ] as const;
 
-    let content: ReactElement;
-    if (activeOpsScreen === "gps-sign-in" || activeOpsScreen === "gps-sign-out") {
-      const clockInCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_in") : { ok: false };
-      const clockOutCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_out") : { ok: false };
+    const selectedProjectSlug =
+      route.name === "projects" && route.projectId ? route.projectId : opsProjectName.toLowerCase().replace(/\s+/g, "-");
+
+    let pageTitle = "Sign In";
+    let pageSubtitle = "Sign workers into the selected project";
+    let content: ReactElement = <div />;
+
+    if (route.name === "sign-out") {
+      pageTitle = "GPS Sign Out";
+      pageSubtitle = "Sign workers out from the selected project";
       content = (
-        <div className="opsFormStack">
-          <label>
-            Project
-            <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
-          </label>
-          <label>
-            Location
-            <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
-          </label>
-          <label>
-            Worker
-            <select value={selectedWorkerId} onChange={(event) => setSelectedWorkerId(event.target.value)} disabled={workers.length === 0}>
-              {workers.length === 0 ? <option value="">No workers yet</option> : null}
-              {workers.map((worker) => (
-                <option key={worker.id} value={worker.id}>
-                  {worker.name} ({worker.role})
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="opsInline">
-            <input type="text" placeholder="New worker name" value={newWorkerName} onChange={(event) => setNewWorkerName(event.target.value)} />
-            <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
-            <button type="button" onClick={() => void addWorker()} disabled={opsLoading}>
-              Add Worker
-            </button>
-          </div>
-          <div className="opsKpi">
-            <strong>{selectedWorker?.name ?? "No worker selected"}</strong>
-            <small>Status: {selectedWorkerIsClockedIn ? "Currently signed in" : "Currently signed out"}</small>
-            <small>
-              GPS: {selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m accuracy` : "Awaiting capture"}{" "}
-              {selectedWorkerGps ? (gpsAccuracyPass ? "(pass)" : "(check location)") : ""}
-            </small>
-          </div>
-          {activeOpsScreen === "gps-sign-in" ? (
-            <button
-              type="button"
-              className="btnSuccess btnWide"
-              onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
-              disabled={!selectedWorker || opsLoading || !clockInCheck.ok}
-            >
-              Sign In
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btnWarning btnWide"
-              onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_out")}
-              disabled={!selectedWorker || opsLoading || !clockOutCheck.ok}
-            >
-              Sign Out
-            </button>
-          )}
-          <small className="opsSubtle">
-            Validation: {activeOpsScreen === "gps-sign-in" ? clockInCheck.reason ?? "Ready to sign in." : clockOutCheck.reason ?? "Ready to sign out."}
-          </small>
+        <div className="opsSignOutGrid">
+          <section className="opsPanel">
+            <h3>Project and location</h3>
+            <div className="opsFields">
+              <label>
+                Project selector
+                <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+              </label>
+              <label>
+                Site address
+                <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+              </label>
+              <label>
+                GPS status
+                <input type="text" value="Live location capture enabled" readOnly />
+              </label>
+              <p className="opsSubtle">Geofence status: active (50m threshold)</p>
+            </div>
+          </section>
+
+          <section className="opsPanel">
+            <h3>Current signed-in workers</h3>
+            <div className="opsList">
+              {signedInWorkers.length === 0 ? (
+                <p>No workers currently signed in.</p>
+              ) : (
+                signedInWorkers.map(({ worker, lastEntry }) => {
+                  const signedAt = lastEntry ? new Date(lastEntry.at) : null;
+                  const elapsedMinutes = signedAt ? Math.max(0, Math.round((Date.now() - signedAt.getTime()) / 60000)) : 0;
+                  const gps = parseGpsNote(lastEntry?.note);
+                  return (
+                    <div key={worker.id} className="opsListRow">
+                      <div>
+                        <strong>{worker.name}</strong>
+                        <small>Signed in: {signedAt ? signedAt.toLocaleString() : "-"}</small>
+                        <small>Duration: {formatMinutes(elapsedMinutes)}</small>
+                        <small>{gps ? `GPS ${gps.accuracyM}m` : "GPS unavailable"}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="btnWarning"
+                        disabled={opsLoading}
+                        onClick={() => {
+                          setSelectedWorkerId(worker.id);
+                          void addTimeEntry(worker.id, "clock_out");
+                        }}
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
         </div>
       );
-    } else if (activeOpsScreen === "timesheet-generation") {
-      const timeScopeMinutes =
+    } else if (route.name === "timesheets") {
+      pageTitle = route.date ? `Timesheet ${route.date}` : "Timesheets";
+      pageSubtitle = "Weekly and daily time summaries with project breakdown";
+      const summaryMinutes =
         opsTimesheetWindow === "day"
-          ? timeSummary.recentDayBreakdown.find((row) => row.day === todayIso)?.minutes ?? 0
-          : timeSummary.recentDayBreakdown.reduce((sum, row) => sum + row.minutes, 0);
+          ? timeSummary.recentDayBreakdown[0]?.minutes ?? 0
+          : timeSummary.recentDayBreakdown.reduce((sum, item) => sum + item.minutes, 0);
       content = (
-        <>
-          <div className="opsInline">
-            <button type="button" className={opsTimesheetWindow === "day" ? "active" : ""} onClick={() => setOpsTimesheetWindow("day")}>
-              Day
-            </button>
-            <button type="button" className={opsTimesheetWindow === "week" ? "active" : ""} onClick={() => setOpsTimesheetWindow("week")}>
-              Week
-            </button>
-          </div>
-          <div className="opsKpiLarge">{formatMinutes(timeScopeMinutes)}</div>
-          <small className="opsSubtle">Total hours for selected window</small>
-          <div className="opsList">
-            {timeSummary.workerBreakdown.slice(0, 4).map((row) => (
-              <div key={row.workerId} className="opsListRow">
-                <div>
-                  <strong>{row.workerName}</strong>
-                  <small>Project allocation</small>
-                </div>
-                <span>{formatMinutes(row.minutes)}</span>
+        <div className="opsTimesheetLayout">
+          <section className="opsSummaryGrid">
+            <div className="opsSummaryCard">
+              <h4>Total hours</h4>
+              <strong>{formatMinutes(summaryMinutes)}</strong>
+            </div>
+            <div className="opsSummaryCard">
+              <h4>Missing entries</h4>
+              <strong>{workers.length - signedInWorkers.length}</strong>
+            </div>
+            <div className="opsSummaryCard">
+              <h4>Export</h4>
+              <div className="opsInline">
+                <button type="button" onClick={() => exportTimesheetCsv(opsTimesheetWindow)}>
+                  CSV
+                </button>
+                <button type="button" onClick={() => notify("PDF export queued.")}>
+                  PDF
+                </button>
               </div>
-            ))}
-          </div>
-          <div className="opsInline">
-            <button type="button" onClick={() => exportTimesheetCsv(opsTimesheetWindow)}>
-              Export CSV
-            </button>
-            <button type="button" onClick={() => notify("PDF export queued.")}>
-              Export PDF
-            </button>
-          </div>
-        </>
+            </div>
+          </section>
+          <section className="opsPanel">
+            <div className="opsInline">
+              <button type="button" className={opsTimesheetWindow === "day" ? "active" : ""} onClick={() => setOpsTimesheetWindow("day")}>
+                Day
+              </button>
+              <button type="button" className={opsTimesheetWindow === "week" ? "active" : ""} onClick={() => setOpsTimesheetWindow("week")}>
+                Week
+              </button>
+              {timeSummary.recentDayBreakdown[0] ? (
+                <button type="button" onClick={() => navigateOps(`/timesheets/${timeSummary.recentDayBreakdown[0].day}`)}>
+                  Open latest date route
+                </button>
+              ) : null}
+            </div>
+            <table className="opsTable">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Hours</th>
+                  <th>Project</th>
+                  <th>Manual Adjust</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeSummary.workerBreakdown.map((row) => (
+                  <tr key={row.workerId}>
+                    <td>{row.workerName}</td>
+                    <td>{formatMinutes(row.minutes)}</td>
+                    <td>{opsProjectName}</td>
+                    <td>
+                      <button type="button" onClick={() => notify(`Manual adjustment queued for ${row.workerName}.`)}>
+                        Adjust
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </div>
       );
-    } else if (activeOpsScreen === "project-files") {
+    } else if (route.name === "projects") {
+      pageTitle = route.section === "files" ? "Project Files" : "Projects";
+      pageSubtitle = "Manage folders, versions, uploads and project file previews";
       content = (
-        <>
-          <input type="text" placeholder="Search files..." value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} />
-          <div className="opsFolderGrid">
-            <aside className="opsFolderList">
+        <div className="opsFilesLayout">
+          <aside className="opsPanel">
+            <h3>Folder tree</h3>
+            <div className="opsFolderList">
               <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
                 Root
               </button>
@@ -2746,256 +2798,300 @@ function App() {
                   {folder.name}
                 </button>
               ))}
-            </aside>
+            </div>
+            <div className="opsInline">
+              <input type="text" value={newFolderName} placeholder="New folder" onChange={(event) => setNewFolderName(event.target.value)} />
+              <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
+                Add
+              </button>
+            </div>
+          </aside>
+          <section className="opsPanel">
+            <div className="opsInline">
+              <button type="button" onClick={() => navigateOps(`/projects/${selectedProjectSlug}`)}>
+                Open Project Route
+              </button>
+              <button type="button" onClick={() => navigateOps(`/projects/${selectedProjectSlug}/files`)}>
+                Open Files Route
+              </button>
+              <input type="text" value={fileSearch} placeholder="Search files" onChange={(event) => setFileSearch(event.target.value)} />
+            </div>
             <div className="opsList">
-              {visibleFiles.slice(0, 6).map((file) => (
+              {visibleFiles.map((file) => (
                 <div key={file.id} className="opsListRow">
                   <div>
                     <strong>{file.name}</strong>
-                    <small>{new Date(file.updatedAt).toLocaleDateString()}</small>
+                    <small>Version {file.status}</small>
+                    <small>Uploaded {new Date(file.updatedAt).toLocaleString()}</small>
                   </div>
-                  <span>{file.status}</span>
+                  <div className="opsInline">
+                    <button type="button" onClick={() => notify(`Previewing ${file.name}`)}>
+                      Preview
+                    </button>
+                    <button type="button" onClick={() => notify(`Downloading ${file.name}`)}>
+                      Download
+                    </button>
+                  </div>
                 </div>
               ))}
               {visibleFiles.length === 0 ? <p>No files in this folder.</p> : null}
             </div>
-          </div>
-          <div className="opsInline">
-            <input type="text" placeholder="New folder" value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} />
-            <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
-              Add Folder
-            </button>
-          </div>
-          <div className="opsInline">
-            <input type="text" placeholder="File name" value={newFileName} onChange={(event) => setNewFileName(event.target.value)} />
-            <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
-              Add File
-            </button>
-          </div>
-        </>
-      );
-    } else if (activeOpsScreen === "forms-library") {
-      content = (
-        <div className="opsList">
-          {availableForms.map((form) => (
-            <button
-              key={form.id}
-              type="button"
-              className="opsListRow opsRowButton"
-              onClick={() => {
-                setActiveFormId(form.id);
-                setActiveFormStep(1);
-                setActiveOpsScreen("form-in-use");
-              }}
-            >
-              <div>
-                <strong>{form.name}</strong>
-                <small>
-                  {form.version} - Updated {form.updatedAt}
-                </small>
-              </div>
-              <span>Open</span>
-            </button>
-          ))}
-          {availableForms.length === 0 ? <p>All forms complete.</p> : null}
+            <div className="opsInline">
+              <input type="text" value={newFileName} placeholder="File name" onChange={(event) => setNewFileName(event.target.value)} />
+              <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
+                Upload
+              </button>
+            </div>
+          </section>
         </div>
       );
-    } else if (activeOpsScreen === "form-in-use") {
-      content = (
-        <div className="opsFormStack">
-          {activeForm ? (
-            <>
+    } else if (route.name === "forms") {
+      if (route.mode === "fill") {
+        pageTitle = activeForm ? `Form: ${activeForm.name}` : "Form Completion";
+        pageSubtitle = "Complete sections, save draft, submit and attach site records";
+        content = (
+          <div className="opsFormFillLayout">
+            <aside className="opsPanel">
+              <h3>Sections</h3>
+              <div className="opsList">
+                {["General", "Safety", "Materials", "Photos", "Signatures"].map((section, idx) => (
+                  <button
+                    key={section}
+                    type="button"
+                    className={activeFormStep === idx + 1 ? "active" : ""}
+                    onClick={() => setActiveFormStep(idx + 1)}
+                  >
+                    {idx + 1}. {section}
+                  </button>
+                ))}
+              </div>
+            </aside>
+            <section className="opsPanel">
               <div className="opsProgressBlock">
-                <small>Section {activeFormStep} of 5</small>
+                <small>Form progress</small>
                 <div className="opsProgressBar">
                   <span style={{ width: `${(activeFormStep / 5) * 100}%` }} />
                 </div>
               </div>
-              <div className="opsKpi">
-                <strong>{activeForm.name}</strong>
-                <small>{activeForm.version}</small>
+              <div className="opsFields">
+                <label>
+                  Text field
+                  <input type="text" placeholder="Enter notes" />
+                </label>
+                <label>
+                  Date
+                  <input type="date" />
+                </label>
+                <label>
+                  Dropdown
+                  <select>
+                    <option>Good</option>
+                    <option>Needs action</option>
+                  </select>
+                </label>
+                <label>
+                  <input type="checkbox" /> Include photographic evidence
+                </label>
+                <label>
+                  Signature
+                  <input type="text" placeholder="Signed by" />
+                </label>
               </div>
-              <label>
-                Date
-                <input type="text" value={new Date().toLocaleDateString()} readOnly />
-              </label>
-              <label>
-                Inspector
-                <input type="text" value={selectedWorker?.name ?? ""} readOnly />
-              </label>
               <div className="opsInline">
-                <button
-                  type="button"
-                  onClick={() => setActiveFormStep((prev) => Math.max(1, prev - 1))}
-                  disabled={activeFormStep === 1}
-                >
+                <button type="button" onClick={() => setActiveFormStep((prev) => Math.max(1, prev - 1))}>
                   Previous
+                </button>
+                <button type="button" onClick={() => setActiveFormStep((prev) => Math.min(5, prev + 1))}>
+                  Next
+                </button>
+                <button type="button" onClick={() => notify("Draft saved locally.")}>
+                  Save Draft
                 </button>
                 <button
                   type="button"
                   className="btnSuccess"
                   onClick={() => {
-                    if (!activeForm) return;
-                    if (activeFormStep < 5) {
-                      setActiveFormStep((prev) => Math.min(5, prev + 1));
-                      return;
-                    }
-                    setCompletedFormIds((prev) => (prev.includes(activeForm.id) ? prev : [...prev, activeForm.id]));
-                    setActiveOpsScreen("form-completed");
-                    notify(`${activeForm.name} completed.`);
+                    if (!route.formId) return;
+                    setCompletedFormIds((prev) => (prev.includes(route.formId!) ? prev : [...prev, route.formId!]));
+                    navigateOps(`/forms/submissions/${route.formId}`);
                   }}
                 >
-                  {activeFormStep < 5 ? "Next" : "Complete"}
-                </button>
-                <button type="button" onClick={() => notify("Draft saved locally.")}>
-                  Save Draft
+                  Submit
                 </button>
               </div>
-            </>
-          ) : (
-            <p>Select a form from Forms Library.</p>
-          )}
-        </div>
-      );
-    } else if (activeOpsScreen === "form-completed") {
-      content = (
-        <div className="opsCentered">
-          <div className="opsSuccessCircle">OK</div>
-          <h4>Form Completed</h4>
-          <p>Your form has been completed successfully.</p>
-          <button type="button" className="btnWarning btnWide" onClick={() => setActiveOpsScreen("export-form")}>
-            Export
-          </button>
-        </div>
-      );
-    } else if (activeOpsScreen === "export-form") {
-      content = (
-        <div className="opsList">
-          <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported PDF document.")}>
-            <div>
-              <strong>PDF Document</strong>
-              <small>Best for printing and sharing</small>
-            </div>
-            <span>{">"}</span>
-          </button>
-          <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported Excel spreadsheet.")}>
-            <div>
-              <strong>Excel Spreadsheet</strong>
-              <small>Best for data analysis</small>
-            </div>
-            <span>{">"}</span>
-          </button>
-          <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported CSV file.")}>
-            <div>
-              <strong>CSV File</strong>
-              <small>Best for import workflows</small>
-            </div>
-            <span>{">"}</span>
-          </button>
-        </div>
-      );
-    } else if (activeOpsScreen === "project-dashboard") {
-      content = (
-        <>
-          <div className="opsDashboardGrid">
-            <div className="opsKpi">
-              <strong>{projectStats.totalFiles}</strong>
-              <small>Files</small>
-            </div>
-            <div className="opsKpi">
-              <strong>{projectStats.totalForms}</strong>
-              <small>Forms</small>
-            </div>
-            <div className="opsKpi">
-              <strong>{projectStats.totalWorkers}</strong>
-              <small>Team</small>
-            </div>
-            <div className="opsKpi">
-              <strong>{formatMinutes(projectStats.totalHoursMinutes)}</strong>
-              <small>Hours</small>
-            </div>
+            </section>
           </div>
-          <div className="opsList">
-            {timeEntries.slice(0, 3).map((entry) => (
-              <div key={entry.id} className="opsListRow">
+        );
+      } else if (route.mode === "view") {
+        pageTitle = "Form Submission";
+        pageSubtitle = "Review completed fields and metadata";
+        content = (
+          <section className="opsPanel">
+            <div className="opsSuccessCircle">OK</div>
+            <h3>Submission completed</h3>
+            <p className="opsSubtle">Submission ID: {route.submissionId}</p>
+            <div className="opsInline">
+              <button type="button" onClick={() => navigateOps(`/forms/submissions/${route.submissionId}/export`)}>
+                Export
+              </button>
+              <button type="button" onClick={() => navigateOps("/forms")}>
+                Back to Forms
+              </button>
+            </div>
+          </section>
+        );
+      } else if (route.mode === "export") {
+        pageTitle = "Export Form";
+        pageSubtitle = "Export completed form in required formats";
+        content = (
+          <section className="opsPanel">
+            <div className="opsList">
+              <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported PDF document.")}>
                 <div>
-                  <strong>{workerById[entry.workerId]?.name ?? "Unknown worker"}</strong>
-                  <small>{new Date(entry.at).toLocaleDateString()}</small>
+                  <strong>PDF Document</strong>
+                  <small>Best for printing and sharing</small>
                 </div>
-                <span>{entry.action === "clock_in" ? "In" : "Out"}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      );
+                <span>{">"}</span>
+              </button>
+              <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported Excel spreadsheet.")}>
+                <div>
+                  <strong>Excel Spreadsheet</strong>
+                  <small>Best for data analysis</small>
+                </div>
+                <span>{">"}</span>
+              </button>
+              <button type="button" className="opsListRow opsRowButton" onClick={() => notify("Exported CSV file.")}>
+                <div>
+                  <strong>CSV File</strong>
+                  <small>Best for import workflows</small>
+                </div>
+                <span>{">"}</span>
+              </button>
+            </div>
+          </section>
+        );
+      } else {
+        pageTitle = "Forms Library";
+        pageSubtitle = "Available, assigned, draft and submitted forms";
+        content = (
+          <section className="opsPanel">
+            <div className="opsInline">
+              <input type="text" placeholder="Search forms..." />
+              <button type="button">Filter</button>
+            </div>
+            <div className="opsList">
+              {availableForms.map((form) => (
+                <div key={form.id} className="opsListRow">
+                  <div>
+                    <strong>{form.name}</strong>
+                    <small>{form.version}</small>
+                    <small>Updated {form.updatedAt}</small>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveFormId(form.id);
+                      setActiveFormStep(1);
+                      navigateOps(`/forms/${form.id}/fill`);
+                    }}
+                  >
+                    Open form
+                  </button>
+                </div>
+              ))}
+              {availableForms.length === 0 ? <p>All forms submitted.</p> : null}
+            </div>
+          </section>
+        );
+      }
     } else {
+      pageTitle = "GPS Sign In";
+      pageSubtitle = "Capture project and worker attendance with geofence checks";
+      const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
+      const selectedWorkerGps = parseGpsNote(selectedWorkerLastAction?.note);
+      const clockInCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_in") : { ok: false };
       content = (
-        <>
-          <div className="opsKpiLarge">{formatMinutes(todayMinutes)}</div>
-          <small className="opsSubtle">Today total hours</small>
-          <div className="opsList">
-            {timeSummary.workerBreakdown.slice(0, 4).map((row) => (
-              <div key={row.workerId} className="opsListRow">
-                <div>
-                  <strong>{row.workerName}</strong>
-                  <small>Today</small>
-                </div>
-                <span>{formatMinutes(row.minutes)}</span>
-              </div>
-            ))}
-          </div>
+        <section className="opsPanel opsFields">
+          <label>
+            Project selector
+            <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+          </label>
+          <label>
+            Site address
+            <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+          </label>
+          <label>
+            Worker
+            <select value={selectedWorkerId} onChange={(event) => setSelectedWorkerId(event.target.value)}>
+              {workers.map((worker) => (
+                <option key={worker.id} value={worker.id}>
+                  {worker.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="opsInline">
-            <button type="button" className="btnWarning" onClick={() => notify("Manual add-entry flow ready.")}>
-              Add Entry
-            </button>
-            <button type="button" onClick={() => exportTimesheetCsv("day")}>
-              Export Day CSV
-            </button>
-            <button type="button" onClick={() => exportTimesheetCsv("week")}>
-              Export Week CSV
+            <input type="text" placeholder="New worker name" value={newWorkerName} onChange={(event) => setNewWorkerName(event.target.value)} />
+            <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
+            <button type="button" onClick={() => void addWorker()}>
+              Add Worker
             </button>
           </div>
-          <small className="opsSubtle">Validation: overlapping sessions are prevented automatically.</small>
-        </>
+          <p className="opsSubtle">
+            GPS accuracy: {selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m` : "not captured yet"} | Geofence:{" "}
+            {selectedWorkerGps && selectedWorkerGps.accuracyM <= 50 ? "inside" : "check location"}
+          </p>
+          <button
+            type="button"
+            className="btnSuccess"
+            disabled={!selectedWorker || !clockInCheck.ok || opsLoading}
+            onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
+          >
+            Sign In
+          </button>
+        </section>
       );
     }
 
     return (
-      <main className="opsMain opsExperience">
-        <section className="opsHero">
-          <div>
-            <h2>MEP Ops Mobile Screens</h2>
-            <p>Single-screen mobile app experience mapped to your 10 reference screens.</p>
-          </div>
-          <p className="opsBackendTag">
-            Backend: {hasSupabaseConfig ? "Supabase" : "Local Storage"}
-            {opsLoading ? " (syncing...)" : ""}
-          </p>
-        </section>
+      <main className="opsAppRoot">
+        <aside className="opsDesktopSidebar">
+          <h2>MEP Ops</h2>
+          <nav>
+            {navItems.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={activeNav === item.key ? "active" : ""}
+                onClick={() => navigateOps(item.path)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-        <section className="opsScreenStrip">
-          {OPS_SCREEN_ITEMS.map((item) => (
-            <button key={item.id} type="button" className={activeOpsScreen === item.id ? "active" : ""} onClick={() => setActiveOpsScreen(item.id)}>
+        <div className="opsAppMain">
+          <header className="opsPageHeader">
+            <div>
+              <h1>{pageTitle}</h1>
+              <p>{pageSubtitle}</p>
+            </div>
+            <div className="opsHeaderMeta">
+              <span>Route: {opsPathname}</span>
+              <span>{hasSupabaseConfig ? "Supabase" : "Local Storage"}</span>
+            </div>
+          </header>
+          <section className="opsPageContent">{content}</section>
+        </div>
+
+        <nav className="opsMobileBottomNav">
+          {navItems.map((item) => (
+            <button key={`mobile-${item.key}`} type="button" className={activeNav === item.key ? "active" : ""} onClick={() => navigateOps(item.path)}>
               {item.label}
             </button>
           ))}
-        </section>
-
-        <section className="opsPhoneStage">
-          <article className="opsMobilePhone">
-            <div className="opsPhoneStatus">
-              <span>9:41</span>
-              <span>MEP Ops</span>
-              <span>100%</span>
-            </div>
-            <header className="opsPhoneHeader">
-              <h3>{activeScreenLabel}</h3>
-              <small>{opsProjectName}</small>
-            </header>
-            <div className="opsPhoneBody">{content}</div>
-            {renderBottomNav()}
-          </article>
-        </section>
+        </nav>
       </main>
     );
   }
@@ -3013,14 +3109,17 @@ function App() {
           <button
             type="button"
             className={activeModule === "markup-studio" ? "active" : ""}
-            onClick={() => setActiveModule("markup-studio")}
+            onClick={() => {
+              window.history.pushState({}, "", "/");
+              setActiveModule("markup-studio");
+            }}
           >
             Markup Studio
           </button>
           <button
             type="button"
             className={activeModule === "operations" ? "active" : ""}
-            onClick={() => setActiveModule("operations")}
+            onClick={() => navigateOps("/sign-in")}
           >
             Operations
           </button>
