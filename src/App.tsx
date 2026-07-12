@@ -133,6 +133,15 @@ function App() {
     () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
     [annotations, selectedId],
   );
+  const lastRotatableAnnotation = useMemo(
+    () =>
+      [...annotations]
+        .reverse()
+        .find((annotation) =>
+          ["line", "arrow", "rect", "cloud", "highlighter", "stamp", "measure"].includes(annotation.type),
+        ) ?? null,
+    [annotations],
+  );
   const pinNumberById = useMemo(() => {
     const map = new Map<string, number>();
     let index = 1;
@@ -496,6 +505,10 @@ function App() {
     setAnnotations((prev) =>
       prev.map((annotation) => (annotation.id === selectedId ? updater(annotation) : annotation)),
     );
+  }
+
+  function updateAnnotationById(targetId: string, updater: (annotation: Annotation) => Annotation): void {
+    setAnnotations((prev) => prev.map((annotation) => (annotation.id === targetId ? updater(annotation) : annotation)));
   }
 
   function resizeAnnotation(annotation: Annotation, pointer: Point, handle: string): Annotation {
@@ -927,11 +940,12 @@ function App() {
   }
 
   function rotateSelectedDrawing(direction: "cw" | "ccw"): void {
-    if (!selectedAnnotation) {
+    const target = selectedAnnotation ?? lastRotatableAnnotation;
+    if (!target) {
       notify("Select an annotation to rotate.");
       return;
     }
-    updateSelectedAnnotation((annotation) => {
+    updateAnnotationById(target.id, (annotation) => {
       if (
         annotation.type === "line" ||
         annotation.type === "arrow" ||
@@ -992,7 +1006,8 @@ function App() {
       }
       return annotation;
     });
-    notify(`Rotated ${selectedAnnotation.type} ${direction === "cw" ? "clockwise" : "counter-clockwise"}.`);
+    setSelectedId(target.id);
+    notify(`Rotated ${target.type} ${direction === "cw" ? "clockwise" : "counter-clockwise"}.`);
   }
 
   function saveMarkupJson(): void {
@@ -2120,10 +2135,10 @@ function App() {
             Clear Calib
           </button>
           <span>{activeCalibration ? `Calib p${activePageForTools}: ${activeCalibration.toFixed(1)} mm/unit` : "Not calibrated"}</span>
-          <button type="button" onClick={() => rotateSelectedDrawing("ccw")} disabled={!selectedAnnotation}>
+          <button type="button" onClick={() => rotateSelectedDrawing("ccw")} disabled={!lastRotatableAnnotation}>
             Rotate Left
           </button>
-          <button type="button" onClick={() => rotateSelectedDrawing("cw")} disabled={!selectedAnnotation}>
+          <button type="button" onClick={() => rotateSelectedDrawing("cw")} disabled={!lastRotatableAnnotation}>
             Rotate Right
           </button>
         </div>
