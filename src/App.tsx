@@ -58,8 +58,27 @@ type TimeEntry = {
   at: string;
   note?: string;
 };
+type Project = {
+  id: string;
+  slug: string;
+  name: string;
+  code: string;
+  status: "active" | "on_hold" | "completed" | "archived";
+  address: string;
+};
 type FolderNode = { id: string; name: string; parentId: string | null };
-type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
+type ProjectFile = {
+  id: string;
+  projectId: string | null;
+  folderId: string | null;
+  name: string;
+  updatedAt: string;
+  status: string;
+  mimeType?: string;
+  dataUrl?: string;
+  uploadedBy?: string;
+  version?: number;
+};
 type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
 type GpsSnapshot = {
   lat: number;
@@ -110,6 +129,24 @@ const FORM_TEMPLATES: FormTemplate[] = [
   { id: "rams", name: "RAMS", version: "v1.0", updatedAt: "15/06/2025" },
   { id: "materials-delivery", name: "Materials Delivery", version: "v1.2", updatedAt: "10/06/2025" },
   { id: "handover-checklist", name: "Handover Checklist", version: "v1.1", updatedAt: "05/06/2025" },
+];
+const DEFAULT_PROJECTS: Project[] = [
+  {
+    id: "proj-1",
+    slug: "new-street-square",
+    name: "New Street Square",
+    code: "NSS",
+    status: "active",
+    address: "London EC4A 3BZ",
+  },
+  {
+    id: "proj-2",
+    slug: "one-crown-place",
+    name: "One Crown Place",
+    code: "OCP",
+    status: "active",
+    address: "London EC2A 4AQ",
+  },
 ];
 
 function makeId(): string {
@@ -219,6 +256,9 @@ function App() {
   const [activeModule, setActiveModule] = useState<AppModule>("markup-studio");
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [projects, setProjects] = useState<Project[]>(DEFAULT_PROJECTS);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(DEFAULT_PROJECTS[0]?.id ?? "");
+  const [newProjectName, setNewProjectName] = useState<string>("");
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [newWorkerName, setNewWorkerName] = useState<string>("");
@@ -237,6 +277,7 @@ function App() {
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
+  const [selectedProjectFileId, setSelectedProjectFileId] = useState<string | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -246,6 +287,7 @@ function App() {
   const openInputRef = useRef<HTMLInputElement | null>(null);
   const loadMarkupInputRef = useRef<HTMLInputElement | null>(null);
   const openBatchInputRef = useRef<HTMLInputElement | null>(null);
+  const projectUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [isMiddlePanning, setIsMiddlePanning] = useState<boolean>(false);
   const panStateRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null);
   const pinchStateRef = useRef<{
@@ -300,6 +342,10 @@ function App() {
     () => Object.fromEntries(workers.map((worker) => [worker.id, worker])),
     [workers],
   );
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
   const latestEntryByWorker = useMemo(() => {
     const map: Record<string, TimeEntry> = {};
     for (const entry of timeEntries) {
@@ -313,11 +359,17 @@ function App() {
   const visibleFiles = useMemo(
     () =>
       projectFiles.filter((file) => {
+        const matchesProject = !file.projectId || file.projectId === selectedProjectId;
+        if (!matchesProject) return false;
         if (file.folderId !== selectedFolderId) return false;
         if (!fileSearch.trim()) return true;
         return file.name.toLowerCase().includes(fileSearch.trim().toLowerCase());
       }),
-    [projectFiles, selectedFolderId, fileSearch],
+    [projectFiles, selectedFolderId, fileSearch, selectedProjectId],
+  );
+  const selectedProjectFile = useMemo(
+    () => projectFiles.find((file) => file.id === selectedProjectFileId) ?? null,
+    [projectFiles, selectedProjectFileId],
   );
   const opsRoute = useMemo(() => parseOpsRoute(opsPathname), [opsPathname]);
   const timeSummary = useMemo(() => {
@@ -367,6 +419,28 @@ function App() {
       setSelectedWorkerId(workers[0].id);
     }
   }, [workers, selectedWorkerId]);
+
+  useEffect(() => {
+    if (projects.length === 0) return;
+    const exists = projects.some((project) => project.id === selectedProjectId);
+    if (!exists) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProject) return;
+    setOpsProjectName(selectedProject.name);
+    setOpsLocationName(selectedProject.address);
+  }, [selectedProject]);
+
+  useEffect(() => {
+    if (opsRoute.name !== "projects" || !opsRoute.projectId) return;
+    const found = projects.find((project) => project.slug === opsRoute.projectId);
+    if (found && found.id !== selectedProjectId) {
+      setSelectedProjectId(found.id);
+    }
+  }, [opsRoute, projects, selectedProjectId]);
 
   useEffect(() => {
     function handlePopState(): void {
@@ -447,10 +521,13 @@ function App() {
           }));
           const loadedFiles = (filesRes.data ?? []).map((row) => ({
             id: row.id,
+            projectId: selectedProjectId || null,
             folderId: row.folder_id,
             name: row.name,
             status: row.status,
             updatedAt: row.updated_at,
+            uploadedBy: "Current User",
+            version: 1,
           }));
           setWorkers(loadedWorkers);
           setTimeEntries(loadedEntries);
@@ -478,7 +555,16 @@ function App() {
         setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
         const loadedFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
         setFolders(loadedFolders);
-        setProjectFiles(Array.isArray(parsed.projectFiles) ? parsed.projectFiles : []);
+        setProjectFiles(
+          Array.isArray(parsed.projectFiles)
+            ? parsed.projectFiles.map((file) => ({
+                ...file,
+                projectId: (file as ProjectFile).projectId ?? selectedProjectId ?? null,
+                version: (file as ProjectFile).version ?? 1,
+                uploadedBy: (file as ProjectFile).uploadedBy ?? "Current User",
+              }))
+            : [],
+        );
         if (loadedFolders.length > 0) {
           setSelectedFolderId(loadedFolders[0].id);
         }
@@ -1519,8 +1605,61 @@ function App() {
     }
   }
 
-  async function addProjectFile(): Promise<void> {
-    const name = newFileName.trim();
+  function toProjectSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function addProject(): void {
+    const name = newProjectName.trim();
+    if (!name) {
+      notify("Enter project name.");
+      return;
+    }
+    const slugBase = toProjectSlug(name) || "project";
+    let slug = slugBase;
+    let idx = 2;
+    while (projects.some((project) => project.slug === slug)) {
+      slug = `${slugBase}-${idx}`;
+      idx += 1;
+    }
+    const project: Project = {
+      id: makeId(),
+      slug,
+      name,
+      code: slug.slice(0, 3).toUpperCase(),
+      status: "active",
+      address: opsLocationName,
+    };
+    setProjects((prev) => [project, ...prev]);
+    setSelectedProjectId(project.id);
+    setNewProjectName("");
+    navigateOps(`/projects/${project.slug}`);
+    notify(`Created project ${project.name}.`);
+  }
+
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          reject(new Error("Could not read file content."));
+          return;
+        }
+        resolve(reader.result);
+      };
+      reader.onerror = () => reject(new Error("Could not read selected file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function addProjectFile(
+    override?: { name: string; mimeType?: string; dataUrl?: string; uploadedBy?: string },
+  ): Promise<void> {
+    const name = (override?.name ?? newFileName).trim();
     if (!name) {
       notify("Enter file name.");
       return;
@@ -1542,10 +1681,15 @@ function App() {
         if (error) throw error;
         const file: ProjectFile = {
           id: data.id,
+          projectId: selectedProjectId,
           folderId: data.folder_id,
           name: data.name,
           status: data.status,
           updatedAt: data.updated_at,
+          mimeType: override?.mimeType,
+          dataUrl: override?.dataUrl,
+          uploadedBy: override?.uploadedBy ?? "Current User",
+          version: 1,
         };
         setProjectFiles((prev) => [file, ...prev]);
         setNewFileName("");
@@ -1559,14 +1703,70 @@ function App() {
     }
     const file: ProjectFile = {
       id: makeId(),
+      projectId: selectedProjectId,
       folderId: selectedFolderId,
       name,
       updatedAt: new Date().toISOString(),
       status: "Draft",
+      mimeType: override?.mimeType,
+      dataUrl: override?.dataUrl,
+      uploadedBy: override?.uploadedBy ?? "Current User",
+      version: 1,
     };
     setProjectFiles((prev) => [file, ...prev]);
     setNewFileName("");
     notify(`Added file ${file.name}.`);
+  }
+
+  async function handleProjectFileUpload(file: File | null): Promise<void> {
+    if (!file) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await addProjectFile({
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        dataUrl,
+        uploadedBy: "Current User",
+      });
+    } catch (error) {
+      notify(`Upload failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  function deleteProjectFile(fileId: string): void {
+    const file = projectFiles.find((item) => item.id === fileId);
+    setProjectFiles((prev) => prev.filter((item) => item.id !== fileId));
+    if (selectedProjectFileId === fileId) {
+      setSelectedProjectFileId(null);
+    }
+    notify(file ? `Deleted ${file.name}.` : "File deleted.");
+  }
+
+  function downloadProjectFile(file: ProjectFile): void {
+    if (!file.dataUrl) {
+      notify("No file content is available for download yet.");
+      return;
+    }
+    const bytes = dataUrlToBytes(file.dataUrl);
+    const blob = new Blob([toArrayBuffer(bytes)], { type: file.mimeType ?? "application/octet-stream" });
+    downloadBlob(blob, file.name);
+  }
+
+  async function openProjectFileInEditor(file: ProjectFile): Promise<void> {
+    if (!(file.mimeType?.includes("pdf") || file.name.toLowerCase().endsWith(".pdf"))) {
+      notify("Only PDF drawings can be opened in the PDF editor.");
+      return;
+    }
+    if (!file.dataUrl) {
+      notify("No source bytes available for this file.");
+      return;
+    }
+    const bytes = dataUrlToBytes(file.dataUrl);
+    const drawingFile = new File([toArrayBuffer(bytes)], file.name, { type: "application/pdf" });
+    await handlePdfFile(drawingFile);
+    window.history.pushState({}, "", "/");
+    setActiveModule("markup-studio");
+    notify(`Opened ${file.name} in PDF editor.`);
   }
 
   function exportTimesheetCsv(scope: "day" | "week"): void {
@@ -2695,8 +2895,7 @@ function App() {
       { key: "more", label: "More", path: "/sign-out" },
     ] as const;
 
-    const selectedProjectSlug =
-      route.name === "projects" && route.projectId ? route.projectId : opsProjectName.toLowerCase().replace(/\s+/g, "-");
+    const selectedProjectSlug = selectedProject?.slug ?? (route.name === "projects" && route.projectId ? route.projectId : "project");
     const mapEmbedUrl = toMapEmbedUrl(liveGps);
     const mapLinkUrl = liveGps
       ? `https://www.openstreetmap.org/?mlat=${liveGps.lat}&mlon=${liveGps.lng}#map=18/${liveGps.lat}/${liveGps.lng}`
@@ -2858,6 +3057,38 @@ function App() {
       content = (
         <div className="opsFilesLayout">
           <aside className="opsPanel">
+            <h3>Project</h3>
+            <div className="opsFields">
+              <label>
+                Select project
+                <select
+                  value={selectedProjectId}
+                  onChange={(event) => {
+                    const next = projects.find((project) => project.id === event.target.value);
+                    if (!next) return;
+                    setSelectedProjectId(next.id);
+                    navigateOps(`/projects/${next.slug}`);
+                  }}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="opsInline">
+                <input
+                  type="text"
+                  placeholder="New project name"
+                  value={newProjectName}
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                />
+                <button type="button" onClick={addProject}>
+                  New Project
+                </button>
+              </div>
+            </div>
             <h3>Folder tree</h3>
             <div className="opsFolderList">
               <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
@@ -2885,26 +3116,65 @@ function App() {
                 Open Files Route
               </button>
               <input type="text" value={fileSearch} placeholder="Search files" onChange={(event) => setFileSearch(event.target.value)} />
+              <label className="uploadLabel">
+                Upload File
+                <input
+                  ref={projectUploadInputRef}
+                  type="file"
+                  onChange={(event) => {
+                    void handleProjectFileUpload(event.target.files?.[0] ?? null);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
             </div>
             <div className="opsList">
               {visibleFiles.map((file) => (
-                <div key={file.id} className="opsListRow">
+                <div
+                  key={file.id}
+                  className={`opsListRow ${selectedProjectFileId === file.id ? "opsRowActive" : ""}`}
+                  onClick={() => setSelectedProjectFileId(file.id)}
+                >
                   <div>
                     <strong>{file.name}</strong>
-                    <small>Version {file.status}</small>
-                    <small>Uploaded {new Date(file.updatedAt).toLocaleString()}</small>
+                    <small>
+                      Version v{file.version ?? 1} • {file.status}
+                    </small>
+                    <small>
+                      Uploaded {new Date(file.updatedAt).toLocaleString()} by {file.uploadedBy ?? "Current User"}
+                    </small>
                   </div>
-                  <div className="opsInline">
-                    <button type="button" onClick={() => notify(`Previewing ${file.name}`)}>
+                  <div className="opsInline opsFileRowActions">
+                    <button type="button" onClick={() => setSelectedProjectFileId(file.id)}>
                       Preview
                     </button>
-                    <button type="button" onClick={() => notify(`Downloading ${file.name}`)}>
+                    <button type="button" onClick={() => downloadProjectFile(file)}>
                       Download
+                    </button>
+                    <button type="button" onClick={() => deleteProjectFile(file.id)}>
+                      Delete
+                    </button>
+                    <button type="button" onClick={() => void openProjectFileInEditor(file)}>
+                      Open in PDF Editor
                     </button>
                   </div>
                 </div>
               ))}
               {visibleFiles.length === 0 ? <p>No files in this folder.</p> : null}
+            </div>
+            <div className="opsPanel opsFilePreview">
+              <h3>File preview</h3>
+              {selectedProjectFile ? (
+                selectedProjectFile.dataUrl && (selectedProjectFile.mimeType?.includes("pdf") || selectedProjectFile.name.toLowerCase().endsWith(".pdf")) ? (
+                  <iframe title={`Preview ${selectedProjectFile.name}`} src={selectedProjectFile.dataUrl} />
+                ) : selectedProjectFile.dataUrl && selectedProjectFile.mimeType?.startsWith("image/") ? (
+                  <img src={selectedProjectFile.dataUrl} alt={selectedProjectFile.name} />
+                ) : (
+                  <p>No embeddable preview for this file type.</p>
+                )
+              ) : (
+                <p>Select a file to preview.</p>
+              )}
             </div>
             <div className="opsInline">
               <input type="text" value={newFileName} placeholder="File name" onChange={(event) => setNewFileName(event.target.value)} />

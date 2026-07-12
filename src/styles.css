@@ -426,6 +426,35 @@ label {
   text-align: left;
 }
 
+.opsRowActive {
+  border-color: #f97316;
+}
+
+.opsFileRowActions button {
+  min-width: 72px;
+}
+
+.opsFilePreview {
+  margin-top: 0.8rem;
+}
+
+.opsFilePreview iframe {
+  width: 100%;
+  min-height: 360px;
+  border: 1px solid #2f4866;
+  border-radius: 8px;
+  background: #0a1628;
+}
+
+.opsFilePreview img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border: 1px solid #2f4866;
+  border-radius: 8px;
+  background: #0a1628;
+}
+
 .opsListRow div {
   display: flex;
   flex-direction: column;
