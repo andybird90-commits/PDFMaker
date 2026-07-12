@@ -1,0 +1,148 @@
+:root {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  color: #111827;
+  background: #f3f4f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.8rem;
+  border-bottom: 1px solid #d1d5db;
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding-right: 0.7rem;
+  border-right: 1px solid #e5e7eb;
+}
+
+.group:last-child {
+  border-right: none;
+}
+
+button,
+input[type="text"] {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button.active {
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+label {
+  font-size: 0.8rem;
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.uploadLabel input[type="file"] {
+  max-width: 12rem;
+}
+
+.viewer {
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.empty {
+  width: min(700px, 100%);
+  margin: 2rem auto;
+  text-align: center;
+  padding: 2rem;
+  border: 2px dashed #9ca3af;
+  border-radius: 12px;
+  background: #fff;
+  color: #4b5563;
+}
+
+.pageSection {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 6px 24px rgba(17, 24, 39, 0.08);
+}
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #4b5563;
+}
+
+.pageHeader h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #111827;
+}
+
+.pageCanvasWrap {
+  position: relative;
+  line-height: 0;
+  user-select: none;
+}
+
+.pdfCanvas {
+  display: block;
+  max-width: 100%;
+  border: 1px solid #e5e7eb;
+}
+
+.overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  cursor: crosshair;
+}
