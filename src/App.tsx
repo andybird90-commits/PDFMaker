@@ -13,7 +13,6 @@ import {
   rectFromPoints,
 } from "./annotationUtils";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
-import { PdfEditor } from "./components/pdf-editor";
 import type {
   Annotation,
   EditorProjectDocument,
@@ -385,7 +384,6 @@ function App() {
   const [selectedProjectFileId, setSelectedProjectFileId] = useState<string | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Record<string, boolean>>({});
   const [versionHistoryFileId, setVersionHistoryFileId] = useState<string | null>(null);
-  const [projectPreviewUrl, setProjectPreviewUrl] = useState<string>("");
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
   const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
   const [openFileNeedsSaveWarning, setOpenFileNeedsSaveWarning] = useState<boolean>(false);
@@ -669,18 +667,6 @@ function App() {
     if (projectEditorContext?.fileId === file.id) return;
     void openProjectFileInEditor(file);
   }, [activeModule, opsRoute, projectFiles, projectEditorContext]);
-
-  useEffect(() => {
-    if (!selectedProjectFile?.dataUrl) {
-      setProjectPreviewUrl("");
-      return;
-    }
-    const bytes = dataUrlToBytes(selectedProjectFile.dataUrl);
-    const blob = new Blob([toArrayBuffer(bytes)], { type: selectedProjectFile.mimeType ?? "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    setProjectPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [selectedProjectFile?.id, selectedProjectFile?.dataUrl, selectedProjectFile?.mimeType]);
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -2329,13 +2315,13 @@ function App() {
     }
     const bytes = dataUrlToBytes(file.dataUrl);
     const drawingFile = new File([toArrayBuffer(bytes)], file.name, { type: "application/pdf" });
-    await handlePdfFile(drawingFile);
     setProjectEditorContext({
       projectId: selectedProjectId,
       fileId: file.id,
       fileName: file.name,
     });
     setActiveModule("markup-studio");
+    await handlePdfFile(drawingFile);
     logProjectActivity("open in pdf editor", file.name, selectedProjectId);
     notify(`Opened ${file.name} in PDF editor.`);
   }
@@ -2347,51 +2333,6 @@ function App() {
     }
     navigateOps(`/projects/${projectSlug}/files/${encodeURIComponent(file.id)}`);
     await openProjectFileInEditor(file);
-  }
-
-  async function saveProjectFileMarkup(
-    fileId: string,
-    result: { pdfBlob: Blob; annotations: unknown },
-  ): Promise<void> {
-    if (!projectPermission.usePdfMarkup || !projectPermission.editFiles) {
-      notify("You do not have permission to save markup changes.");
-      return;
-    }
-    const file = projectFiles.find((item) => item.id === fileId);
-    if (!file) return;
-    const nextDataUrl = await fileToDataUrl(new File([result.pdfBlob], file.name, { type: "application/pdf" }));
-    const currentVersion = file.version ?? 1;
-    setProjectFileVersions((prev) => [
-      {
-        id: makeId(),
-        fileId: file.id,
-        projectId: selectedProjectId,
-        version: currentVersion,
-        dataUrl: file.dataUrl,
-        uploadedBy: file.uploadedBy ?? CURRENT_USER.name,
-        uploadedAt: file.updatedAt,
-        changeNote: "Before markup save",
-      },
-      ...prev,
-    ]);
-    setProjectFiles((prev) =>
-      prev.map((item) =>
-        item.id === fileId
-          ? {
-              ...item,
-              dataUrl: nextDataUrl,
-              annotations: result.annotations,
-              version: currentVersion + 1,
-              updatedAt: new Date().toISOString(),
-              status: "Marked Up",
-              uploadedBy: CURRENT_USER.name,
-            }
-          : item,
-      ),
-    );
-    setOpenFileNeedsSaveWarning(false);
-    logProjectActivity("markup saved", file.name, selectedProjectId);
-    notify(`Saved markup to ${file.name} (v${currentVersion + 1}).`);
   }
 
   async function saveCurrentMarkupStudioToProject(): Promise<boolean> {
@@ -4061,7 +4002,16 @@ function App() {
                 <div className="opsList opsFileRows">
                   {visibleFiles.map((file) => (
                     <div key={file.id} className={`opsListRow ${selectedProjectFileId === file.id ? "opsRowActive" : ""}`}>
-                      <button type="button" className="opsFilePrimary" onClick={() => setSelectedProjectFileId(file.id)}>
+                      <button
+                        type="button"
+                        className="opsFilePrimary"
+                        onClick={() => {
+                          setSelectedProjectFileId(file.id);
+                          if (file.mimeType?.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) {
+                            void openProjectFileFullView(file, workspaceProject?.slug ?? "project");
+                          }
+                        }}
+                      >
                         <strong>{file.name}</strong>
                         <small>v{file.version ?? 1}</small>
                         <small>{file.mimeType ?? "Unknown"}</small>
@@ -4116,20 +4066,8 @@ function App() {
                 <h3>Preview / PDF Editor</h3>
                 {selectedProjectFile ? (
                   selectedProjectFile.mimeType?.includes("pdf") || selectedProjectFile.name.toLowerCase().endsWith(".pdf") ? (
-                    <>
-                      {projectPreviewUrl ? (
-                        <div className="opsEmbeddedEditor">
-                          <PdfEditor
-                            url={projectPreviewUrl}
-                            initialAnnotations={selectedProjectFile.annotations}
-                            readOnly={!projectPermission.usePdfMarkup}
-                            onSave={(result) => saveProjectFileMarkup(selectedProjectFile.id, result)}
-                            onClose={() => setSelectedProjectFileId(null)}
-                          />
-                        </div>
-                      ) : (
-                        <p>PDF preview unavailable.</p>
-                      )}
+                    <div className="opsFileDetails">
+                      <p>PDF drawings open in the full markup editor workspace.</p>
                       <div className="opsInline">
                         <button type="button" onClick={() => void openProjectFileFullView(selectedProjectFile, workspaceProject?.slug ?? "project")}>
                           Open in full editor
@@ -4138,7 +4076,7 @@ function App() {
                           Download
                         </button>
                       </div>
-                    </>
+                    </div>
                   ) : selectedProjectFile.mimeType?.startsWith("image/") && selectedProjectFile.dataUrl ? (
                     <img src={selectedProjectFile.dataUrl} alt={selectedProjectFile.name} className="opsPreviewImage" />
                   ) : (
