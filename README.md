@@ -34,6 +34,12 @@ npm install
 npm run dev
 ```
 
+Run with automatic browser open:
+
+```bash
+npm run dev:open
+```
+
 Build for production:
 
 ```bash
