@@ -2331,7 +2331,11 @@ function App() {
       notify("You do not have permission to use PDF markup.");
       return;
     }
-    navigateOps(`/projects/${projectSlug}/files/${encodeURIComponent(file.id)}`);
+    const targetPath = `/projects/${projectSlug}/files/${encodeURIComponent(file.id)}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, "", targetPath);
+    }
+    setOpsPathname(targetPath);
     await openProjectFileInEditor(file);
   }
 
