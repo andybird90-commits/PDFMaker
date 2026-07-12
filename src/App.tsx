@@ -61,6 +61,13 @@ type TimeEntry = {
 type FolderNode = { id: string; name: string; parentId: string | null };
 type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
 type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
+type GpsSnapshot = {
+  lat: number;
+  lng: number;
+  accuracyM: number;
+  capturedAt: string;
+  source: "device" | "entry";
+};
 type OpsRoute =
   | { name: "sign-in" }
   | { name: "sign-out" }
@@ -167,6 +174,18 @@ function parseOpsRoute(pathname: string): OpsRoute {
   return { name: "sign-in" };
 }
 
+function toMapEmbedUrl(gps: GpsSnapshot | null): string {
+  if (!gps) {
+    return "https://www.openstreetmap.org/export/embed.html?bbox=-0.17%2C51.49%2C-0.08%2C51.53&layer=mapnik";
+  }
+  const delta = 0.008;
+  const minLng = gps.lng - delta;
+  const maxLng = gps.lng + delta;
+  const minLat = gps.lat - delta;
+  const maxLat = gps.lat + delta;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLng}%2C${minLat}%2C${maxLng}%2C${maxLat}&layer=mapnik&marker=${gps.lat}%2C${gps.lng}`;
+}
+
 function App() {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
@@ -217,6 +236,7 @@ function App() {
   const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/sign-in");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
+  const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -299,6 +319,7 @@ function App() {
       }),
     [projectFiles, selectedFolderId, fileSearch],
   );
+  const opsRoute = useMemo(() => parseOpsRoute(opsPathname), [opsPathname]);
   const timeSummary = useMemo(() => {
     const sorted = [...timeEntries].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
     const openByWorker: Record<string, number | null> = {};
@@ -360,6 +381,12 @@ function App() {
       setActiveModule("operations");
     }
   }, [opsPathname]);
+
+  useEffect(() => {
+    if (activeModule !== "operations") return;
+    if (opsRoute.name !== "sign-in" && opsRoute.name !== "sign-out") return;
+    void refreshLiveGps();
+  }, [activeModule, opsRoute.name]);
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -1325,6 +1352,22 @@ function App() {
     });
   }
 
+  async function refreshLiveGps(): Promise<void> {
+    const note = await captureGpsNote();
+    const parsed = parseGpsNote(note);
+    if (!parsed) {
+      notify("Live GPS unavailable. Check permissions/location settings.");
+      return;
+    }
+    setLiveGps({
+      lat: parsed.lat,
+      lng: parsed.lng,
+      accuracyM: parsed.accuracyM,
+      capturedAt: new Date().toISOString(),
+      source: "device",
+    });
+  }
+
   async function addWorker(): Promise<void> {
     const name = newWorkerName.trim();
     if (!name) {
@@ -1376,6 +1419,15 @@ function App() {
     }
     const gpsNote = await captureGpsNote();
     const gps = parseGpsNote(gpsNote);
+    if (gps) {
+      setLiveGps({
+        lat: gps.lat,
+        lng: gps.lng,
+        accuracyM: gps.accuracyM,
+        capturedAt: new Date().toISOString(),
+        source: "entry",
+      });
+    }
 
     if (hasSupabaseConfig && supabase) {
       setOpsLoading(true);
@@ -2622,7 +2674,7 @@ function App() {
   }
 
   function renderOperationsModule(): ReactElement {
-    const route = parseOpsRoute(opsPathname);
+    const route = opsRoute;
     const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId) ?? null;
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
     const currentFormId = route.name === "forms" ? route.formId : undefined;
@@ -2645,6 +2697,10 @@ function App() {
 
     const selectedProjectSlug =
       route.name === "projects" && route.projectId ? route.projectId : opsProjectName.toLowerCase().replace(/\s+/g, "-");
+    const mapEmbedUrl = toMapEmbedUrl(liveGps);
+    const mapLinkUrl = liveGps
+      ? `https://www.openstreetmap.org/?mlat=${liveGps.lat}&mlon=${liveGps.lng}#map=18/${liveGps.lat}/${liveGps.lng}`
+      : "https://www.openstreetmap.org";
 
     let pageTitle = "Sign In";
     let pageSubtitle = "Sign workers into the selected project";
@@ -2668,9 +2724,23 @@ function App() {
               </label>
               <label>
                 GPS status
-                <input type="text" value="Live location capture enabled" readOnly />
+                <input type="text" value={liveGps ? `GPS ${liveGps.accuracyM}m accuracy` : "Live location capture enabled"} readOnly />
               </label>
-              <p className="opsSubtle">Geofence status: active (50m threshold)</p>
+              <p className="opsSubtle">
+                Geofence status: {liveGps ? (liveGps.accuracyM <= 50 ? "within boundary" : "outside/low accuracy") : "awaiting GPS"} (50m
+                threshold)
+              </p>
+              <div className="opsInline">
+                <button type="button" onClick={() => void refreshLiveGps()}>
+                  Refresh GPS
+                </button>
+                <a href={mapLinkUrl} target="_blank" rel="noreferrer">
+                  Open map
+                </a>
+              </div>
+              <div className="opsMapCard">
+                <iframe title="Live site map" src={mapEmbedUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+              </div>
             </div>
           </section>
 
@@ -3011,45 +3081,67 @@ function App() {
       const selectedWorkerGps = parseGpsNote(selectedWorkerLastAction?.note);
       const clockInCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_in") : { ok: false };
       content = (
-        <section className="opsPanel opsFields">
-          <label>
-            Project selector
-            <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
-          </label>
-          <label>
-            Site address
-            <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
-          </label>
-          <label>
-            Worker
-            <select value={selectedWorkerId} onChange={(event) => setSelectedWorkerId(event.target.value)}>
-              {workers.map((worker) => (
-                <option key={worker.id} value={worker.id}>
-                  {worker.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="opsInline">
-            <input type="text" placeholder="New worker name" value={newWorkerName} onChange={(event) => setNewWorkerName(event.target.value)} />
-            <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
-            <button type="button" onClick={() => void addWorker()}>
-              Add Worker
+        <div className="opsSignInGrid">
+          <section className="opsPanel opsFields">
+            <label>
+              Project selector
+              <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+            </label>
+            <label>
+              Site address
+              <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+            </label>
+            <label>
+              Worker
+              <select value={selectedWorkerId} onChange={(event) => setSelectedWorkerId(event.target.value)}>
+                {workers.map((worker) => (
+                  <option key={worker.id} value={worker.id}>
+                    {worker.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="opsInline">
+              <input type="text" placeholder="New worker name" value={newWorkerName} onChange={(event) => setNewWorkerName(event.target.value)} />
+              <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
+              <button type="button" onClick={() => void addWorker()}>
+                Add Worker
+              </button>
+            </div>
+            <p className="opsSubtle">
+              GPS accuracy: {liveGps ? `${liveGps.accuracyM}m` : selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m` : "not captured yet"} |
+              Geofence: {(liveGps && liveGps.accuracyM <= 50) || (selectedWorkerGps && selectedWorkerGps.accuracyM <= 50) ? "inside" : "check location"}
+            </p>
+            <button
+              type="button"
+              className="btnSuccess"
+              disabled={!selectedWorker || !clockInCheck.ok || opsLoading}
+              onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
+            >
+              Sign In
             </button>
-          </div>
-          <p className="opsSubtle">
-            GPS accuracy: {selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m` : "not captured yet"} | Geofence:{" "}
-            {selectedWorkerGps && selectedWorkerGps.accuracyM <= 50 ? "inside" : "check location"}
-          </p>
-          <button
-            type="button"
-            className="btnSuccess"
-            disabled={!selectedWorker || !clockInCheck.ok || opsLoading}
-            onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
-          >
-            Sign In
-          </button>
-        </section>
+          </section>
+
+          <section className="opsPanel">
+            <h3>Live GPS Map</h3>
+            <div className="opsMapCard">
+              <iframe title="Sign in live map" src={mapEmbedUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+            </div>
+            <div className="opsInline">
+              <button type="button" onClick={() => void refreshLiveGps()}>
+                Refresh GPS
+              </button>
+              <a href={mapLinkUrl} target="_blank" rel="noreferrer">
+                Open map
+              </a>
+            </div>
+            <p className="opsSubtle">
+              {liveGps
+                ? `Captured ${new Date(liveGps.capturedAt).toLocaleTimeString()} (${liveGps.source}).`
+                : "Map will update when GPS is captured."}
+            </p>
+          </section>
+        </div>
       );
     }
 
