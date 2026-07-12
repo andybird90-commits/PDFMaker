@@ -147,6 +147,11 @@ type BatchDocument = {
   calibrationByPage: Record<number, number>;
   rotationByPage: Record<number, number>;
 };
+type ProjectEditorContext = {
+  projectId: string;
+  fileId: string;
+  fileName: string;
+};
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
@@ -333,7 +338,7 @@ function App() {
   const [batchDocuments, setBatchDocuments] = useState<BatchDocument[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [activePage, setActivePage] = useState<number>(1);
-  const [activeModule, setActiveModule] = useState<AppModule>("markup-studio");
+  const [activeModule, setActiveModule] = useState<AppModule>("operations");
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>(DEFAULT_PROJECTS);
@@ -377,6 +382,7 @@ function App() {
   const [versionHistoryFileId, setVersionHistoryFileId] = useState<string | null>(null);
   const [projectPreviewUrl, setProjectPreviewUrl] = useState<string>("");
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
+  const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -961,6 +967,16 @@ function App() {
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
   }
 
   async function handlePdfFile(file: File): Promise<void> {
@@ -2254,7 +2270,11 @@ function App() {
     const bytes = dataUrlToBytes(file.dataUrl);
     const drawingFile = new File([toArrayBuffer(bytes)], file.name, { type: "application/pdf" });
     await handlePdfFile(drawingFile);
-    window.history.pushState({}, "", "/");
+    setProjectEditorContext({
+      projectId: selectedProjectId,
+      fileId: file.id,
+      fileName: file.name,
+    });
     setActiveModule("markup-studio");
     logProjectActivity("open in pdf editor", file.name, selectedProjectId);
     notify(`Opened ${file.name} in PDF editor.`);
@@ -2304,6 +2324,57 @@ function App() {
     notify(`Saved markup to ${file.name} (v${currentVersion + 1}).`);
   }
 
+  async function saveCurrentMarkupStudioToProject(): Promise<boolean> {
+    if (!projectEditorContext) return false;
+    const bytes = await buildFlattenedPdfBytes();
+    if (!bytes) {
+      notify("Open a PDF before saving.");
+      return true;
+    }
+    const fileId = projectEditorContext.fileId;
+    const target = projectFiles.find((item) => item.id === fileId);
+    if (!target) {
+      notify("Project file record was not found.");
+      return true;
+    }
+    const currentVersion = target.version ?? 1;
+    const nextDataUrl = `data:application/pdf;base64,${bytesToBase64(bytes)}`;
+    setProjectFileVersions((prev) => [
+      {
+        id: makeId(),
+        fileId,
+        projectId: projectEditorContext.projectId,
+        version: currentVersion,
+        dataUrl: target.dataUrl,
+        uploadedBy: target.uploadedBy ?? CURRENT_USER.name,
+        uploadedAt: target.updatedAt,
+        changeNote: "Before markup save from full editor",
+      },
+      ...prev,
+    ]);
+    setProjectFiles((prev) =>
+      prev.map((item) =>
+        item.id === fileId
+          ? {
+              ...item,
+              dataUrl: nextDataUrl,
+              updatedAt: new Date().toISOString(),
+              version: currentVersion + 1,
+              status: "Marked Up",
+              annotations: {
+                schemaVersion: 1,
+                annotations,
+              },
+              uploadedBy: CURRENT_USER.name,
+            }
+          : item,
+      ),
+    );
+    logProjectActivity("markup saved", target.name, projectEditorContext.projectId);
+    notify(`Saved ${target.name} back to project (v${currentVersion + 1}).`);
+    return true;
+  }
+
   function exportTimesheetCsv(scope: "day" | "week"): void {
     const now = new Date();
     const minDate = new Date(now);
@@ -2338,7 +2409,23 @@ function App() {
       window.history.pushState({}, "", path);
     }
     setOpsPathname(path);
+    setProjectEditorContext(null);
     setActiveModule("operations");
+  }
+
+  function exitProjectMarkupStudio(): void {
+    if (!projectEditorContext) {
+      navigateOps("/projects");
+      return;
+    }
+    const project = projects.find((item) => item.id === projectEditorContext.projectId);
+    if (project) {
+      setSelectedProjectId(project.id);
+      setSelectedProjectFileId(projectEditorContext.fileId);
+      navigateOps(`/projects/${project.slug}/files`);
+      return;
+    }
+    navigateOps("/projects");
   }
 
   function applyPinStatus(status: PinStatus): void {
@@ -2877,6 +2964,10 @@ function App() {
         notify("Open a PDF before saving.");
         return;
       }
+      const savedToProject = await saveCurrentMarkupStudioToProject();
+      if (savedToProject) {
+        return;
+      }
       if (pdfFileHandle) {
         await savePdfToHandle(pdfFileHandle);
         notify("Saved PDF successfully.");
@@ -2896,6 +2987,19 @@ function App() {
       const bytes = await buildFlattenedPdfBytes();
       if (!bytes) {
         notify("Open a PDF before Save As.");
+        return;
+      }
+      if (projectEditorContext) {
+        const saveAsName = window.prompt("Save As file name", `${pdfName.replace(/\.pdf$/i, "")}-copy.pdf`)?.trim();
+        if (!saveAsName) return;
+        await addProjectFile({
+          name: saveAsName.toLowerCase().endsWith(".pdf") ? saveAsName : `${saveAsName}.pdf`,
+          mimeType: "application/pdf",
+          dataUrl: `data:application/pdf;base64,${bytesToBase64(bytes)}`,
+          uploadedBy: CURRENT_USER.name,
+          fileSize: bytes.byteLength,
+        });
+        notify("Saved As new project PDF.");
         return;
       }
       if (typeof (window as any).showSaveFilePicker === "function") {
@@ -4393,16 +4497,11 @@ function App() {
           <p>Operational workspace with markup studio</p>
         </div>
         <div className="opsInline">
-          <button
-            type="button"
-            className={activeModule === "markup-studio" ? "active" : ""}
-            onClick={() => {
-              window.history.pushState({}, "", "/");
-              setActiveModule("markup-studio");
-            }}
-          >
-            Markup Studio
-          </button>
+          {activeModule === "markup-studio" ? (
+            <button type="button" onClick={exitProjectMarkupStudio}>
+              Back to Project Files
+            </button>
+          ) : null}
           <button
             type="button"
             className={activeModule === "operations" ? "active" : ""}
