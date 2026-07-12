@@ -676,6 +676,11 @@ function App() {
     setScale(1.25);
   }
 
+  function closeAllMenus(): void {
+    const openMenus = document.querySelectorAll<HTMLDetailsElement>(".menuItem[open]");
+    openMenus.forEach((menu) => menu.removeAttribute("open"));
+  }
+
   function onViewportMouseDown(event: React.MouseEvent<HTMLElement>): void {
     if (event.button !== 1) return;
     const target = event.currentTarget;
@@ -1445,41 +1450,41 @@ function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <nav className="menuBar" aria-label="Application menu">
-          <details className="menuItem">
+        <nav className="menuBar" aria-label="Application menu" onMouseLeave={closeAllMenus}>
+          <details className="menuItem" onMouseLeave={closeAllMenus}>
             <summary>File</summary>
             <div className="menuPanel">
-              <button type="button" onClick={() => void triggerOpenDialog()}>
+              <button type="button" onClick={() => { closeAllMenus(); void triggerOpenDialog(); }}>
                 Open...
               </button>
-              <button type="button" onClick={() => void savePdf()} disabled={!pdfDoc}>
+              <button type="button" onClick={() => { closeAllMenus(); void savePdf(); }} disabled={!pdfDoc}>
                 Save
               </button>
-              <button type="button" onClick={() => void savePdfAs()} disabled={!pdfDoc}>
+              <button type="button" onClick={() => { closeAllMenus(); void savePdfAs(); }} disabled={!pdfDoc}>
                 Save As...
               </button>
-              <button type="button" onClick={triggerLoadMarkupsDialog}>
+              <button type="button" onClick={() => { closeAllMenus(); triggerLoadMarkupsDialog(); }}>
                 Open Markups...
               </button>
-              <button type="button" onClick={saveMarkupJson} disabled={annotations.length === 0}>
+              <button type="button" onClick={() => { closeAllMenus(); saveMarkupJson(); }} disabled={annotations.length === 0}>
                 Save Markups
               </button>
-              <button type="button" onClick={() => void exportFlattenedPdf()} disabled={!pdfDoc}>
+              <button type="button" onClick={() => { closeAllMenus(); void exportFlattenedPdf(); }} disabled={!pdfDoc}>
                 Export PDF
               </button>
-              <button type="button" onClick={() => void exportAnnotatedPngs()} disabled={!pdfDoc}>
+              <button type="button" onClick={() => { closeAllMenus(); void exportAnnotatedPngs(); }} disabled={!pdfDoc}>
                 Export PNG
               </button>
               <button
                 type="button"
-                onClick={exportPinsJson}
+                onClick={() => { closeAllMenus(); exportPinsJson(); }}
                 disabled={!annotations.some((annotation) => annotation.type === "pin")}
               >
                 Export Pins JSON
               </button>
               <button
                 type="button"
-                onClick={exportPinsCsv}
+                onClick={() => { closeAllMenus(); exportPinsCsv(); }}
                 disabled={!annotations.some((annotation) => annotation.type === "pin")}
               >
                 Export Pins CSV
@@ -1487,37 +1492,37 @@ function App() {
             </div>
           </details>
 
-          <details className="menuItem">
+          <details className="menuItem" onMouseLeave={closeAllMenus}>
             <summary>Edit</summary>
             <div className="menuPanel">
-              <button type="button" onClick={undoLast} disabled={annotations.length === 0}>
+              <button type="button" onClick={() => { closeAllMenus(); undoLast(); }} disabled={annotations.length === 0}>
                 Undo
               </button>
-              <button type="button" onClick={removeSelected} disabled={!selectedId}>
+              <button type="button" onClick={() => { closeAllMenus(); removeSelected(); }} disabled={!selectedId}>
                 Delete Selected
               </button>
-              <button type="button" onClick={clearAll} disabled={annotations.length === 0}>
+              <button type="button" onClick={() => { closeAllMenus(); clearAll(); }} disabled={annotations.length === 0}>
                 Clear All
               </button>
             </div>
           </details>
 
-          <details className="menuItem">
+          <details className="menuItem" onMouseLeave={closeAllMenus}>
             <summary>View</summary>
             <div className="menuPanel">
-              <button type="button" onClick={zoomIn}>
+              <button type="button" onClick={() => { closeAllMenus(); zoomIn(); }}>
                 Zoom In
               </button>
-              <button type="button" onClick={zoomOut}>
+              <button type="button" onClick={() => { closeAllMenus(); zoomOut(); }}>
                 Zoom Out
               </button>
-              <button type="button" onClick={zoomReset}>
+              <button type="button" onClick={() => { closeAllMenus(); zoomReset(); }}>
                 Reset Zoom
               </button>
             </div>
           </details>
 
-          <details className="menuItem">
+          <details className="menuItem" onMouseLeave={closeAllMenus}>
             <summary>Tools</summary>
             <div className="menuPanel">
               {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp", "pin"] as Tool[]).map((name) => (
@@ -1525,6 +1530,7 @@ function App() {
                   key={`menu-${name}`}
                   type="button"
                   onClick={() => {
+                    closeAllMenus();
                     setTool(name);
                     setSelectedId(null);
                   }}
