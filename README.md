@@ -15,6 +15,10 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - pins with status/scheduling/photo metadata
   - calibration + measurement tools (mm)
 - Select + drag existing annotations
+- Select workflow:
+  - choose the `select` tool, tap/click annotation to select
+  - edit selected markup (including rotate actions)
+  - delete selected markup via UI button or keyboard Delete/Backspace
 - Resize handles for line endpoints, rectangles, clouds, and stamps
 - Undo last annotation and clear all
 - Zoom support
@@ -22,6 +26,7 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
 - Mouse controls:
   - wheel zoom is cursor-anchored (no concurrent page drift while zooming)
   - middle mouse button drag pans around the document viewport
+  - mobile pinch-to-zoom support
 - Bluebeam-inspired dark operator UI skin (toolbar + side rail)
 - Tool-first top ribbon (no dropdown menus)
 - Styling controls:

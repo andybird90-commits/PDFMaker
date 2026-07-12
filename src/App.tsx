@@ -123,6 +123,14 @@ function App() {
   const openBatchInputRef = useRef<HTMLInputElement | null>(null);
   const [isMiddlePanning, setIsMiddlePanning] = useState<boolean>(false);
   const panStateRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null);
+  const pinchStateRef = useRef<{
+    initialDistance: number;
+    initialScale: number;
+    anchorX: number;
+    anchorY: number;
+    contentX: number;
+    contentY: number;
+  } | null>(null);
   const suppressBatchSyncRef = useRef<boolean>(false);
 
   const sortedAnnotations = useMemo(
@@ -185,6 +193,27 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STAMPS_STORAGE_KEY, JSON.stringify(customStamps));
   }, [customStamps]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isTypingContext =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        target?.isContentEditable;
+      if (isTypingContext) return;
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (!selectedId) return;
+        event.preventDefault();
+        removeSelected();
+        notify("Deleted selected annotation.");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedId]);
 
   useEffect(() => {
     if (!activeBatchId || suppressBatchSyncRef.current) return;
@@ -900,6 +929,51 @@ function App() {
   function endViewportPan(): void {
     setIsMiddlePanning(false);
     panStateRef.current = null;
+  }
+
+  function touchDistance(t1: { clientX: number; clientY: number }, t2: { clientX: number; clientY: number }): number {
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onViewportTouchStart(event: React.TouchEvent<HTMLElement>): void {
+    if (event.touches.length < 2) return;
+    const [t1, t2] = [event.touches[0], event.touches[1]];
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const midpointX = (t1.clientX + t2.clientX) / 2 - rect.left;
+    const midpointY = (t1.clientY + t2.clientY) / 2 - rect.top;
+    pinchStateRef.current = {
+      initialDistance: touchDistance(t1, t2),
+      initialScale: scale,
+      anchorX: midpointX,
+      anchorY: midpointY,
+      contentX: (target.scrollLeft + midpointX) / scale,
+      contentY: (target.scrollTop + midpointY) / scale,
+    };
+  }
+
+  function onViewportTouchMove(event: React.TouchEvent<HTMLElement>): void {
+    if (event.touches.length < 2 || !pinchStateRef.current) return;
+    event.preventDefault();
+    const [t1, t2] = [event.touches[0], event.touches[1]];
+    const currentDistance = touchDistance(t1, t2);
+    const ratio = currentDistance / pinchStateRef.current.initialDistance;
+    const nextScale = pinchStateRef.current.initialScale * ratio;
+    zoomAnchorRef.current = {
+      mouseX: pinchStateRef.current.anchorX,
+      mouseY: pinchStateRef.current.anchorY,
+      contentX: pinchStateRef.current.contentX,
+      contentY: pinchStateRef.current.contentY,
+    };
+    setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale)));
+  }
+
+  function onViewportTouchEnd(event: React.TouchEvent<HTMLElement>): void {
+    if (event.touches.length < 2) {
+      pinchStateRef.current = null;
+    }
   }
 
   function addCustomStamp(name: string, dataUrl: string): void {
@@ -2416,6 +2490,10 @@ function App() {
               onMouseMove={onViewportMouseMove}
               onMouseUp={endViewportPan}
               onMouseLeave={endViewportPan}
+              onTouchStart={onViewportTouchStart}
+              onTouchMove={onViewportTouchMove}
+              onTouchEnd={onViewportTouchEnd}
+              onTouchCancel={onViewportTouchEnd}
             >
               {pages.map((page) => {
                 const size = pageSizes[page];
