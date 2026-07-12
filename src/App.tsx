@@ -172,7 +172,7 @@ function App() {
     () => customStamps.find((stamp) => stamp.id === activeCustomStampId) ?? null,
     [customStamps, activeCustomStampId],
   );
-  const activePageForTools = selectedAnnotation?.page ?? activePage;
+  const activePageForTools = activePage;
   const activeCalibration = calibrationByPage[activePageForTools];
 
   useEffect(() => {
@@ -746,12 +746,18 @@ function App() {
         notify("Calibration line too short.");
       } else {
         const entered = window.prompt("Known length in millimeters (mm):", "1000");
-        if (entered && !Number.isNaN(Number(entered))) {
-          const knownMm = Number(entered);
-          if (knownMm > 0) {
+        if (entered === null) {
+          notify("Calibration cancelled.");
+        } else {
+          const normalizedInput = entered.trim().replace(",", ".");
+          const knownMm = Number(normalizedInput);
+          if (!Number.isFinite(knownMm) || knownMm <= 0) {
+            notify("Invalid calibration value. Enter a positive number in mm.");
+          } else {
             const mmPerUnit = knownMm / distance;
             setCalibrationByPage((prev) => ({ ...prev, [page]: mmPerUnit }));
-            notify(`Calibrated page ${page}: ${knownMm} mm.`);
+            setActivePage(page);
+            notify(`Calibrated page ${page}: ${knownMm.toFixed(2)} mm.`);
           }
         }
       }
