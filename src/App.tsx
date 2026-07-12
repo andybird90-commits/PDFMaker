@@ -2406,161 +2406,167 @@ function App() {
 
         {selectedAnnotation ? (
           <div className="group panel panel-selected">
-            <span className="panelTitle">Selected Annotation</span>
-            <strong>Selected</strong>
-            {selectedAnnotation.type !== "pin" ? (
-              <>
-                <label>
-                  Color
-                  <input
-                    type="color"
-                    value={selectedAnnotation.color}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) => ({ ...annotation, color: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Weight
-                  <input
-                    type="range"
-                    min={1}
-                    max={24}
-                    value={selectedAnnotation.strokeWidth}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) => ({
-                        ...annotation,
-                        strokeWidth: Number(event.target.value),
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  Type
-                  <select
-                    value={selectedAnnotation.lineStyle ?? "solid"}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) => ({
-                        ...annotation,
-                        lineStyle: event.target.value as LineStyle,
-                      }))
-                    }
-                  >
-                    <option value="solid">Solid</option>
-                    <option value="dashed">Dashed</option>
-                    <option value="dotted">Dotted</option>
-                  </select>
-                </label>
-                {selectedAnnotation.type === "highlighter" ? (
-                  <label>
-                    Opacity
-                    <input
-                      type="range"
-                      min={0.1}
-                      max={1}
-                      step={0.05}
-                      value={selectedAnnotation.opacity}
-                      onChange={(event) =>
+            <details className="selectedDetails">
+              <summary>
+                Selected Annotation
+                <span className="selectedMeta">#{selectedAnnotation.id.slice(0, 6)}</span>
+              </summary>
+              <div className="selectedDetailsBody">
+                {selectedAnnotation.type !== "pin" ? (
+                  <>
+                    <label>
+                      Color
+                      <input
+                        type="color"
+                        value={selectedAnnotation.color}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) => ({ ...annotation, color: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Weight
+                      <input
+                        type="range"
+                        min={1}
+                        max={24}
+                        value={selectedAnnotation.strokeWidth}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) => ({
+                            ...annotation,
+                            strokeWidth: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Type
+                      <select
+                        value={selectedAnnotation.lineStyle ?? "solid"}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) => ({
+                            ...annotation,
+                            lineStyle: event.target.value as LineStyle,
+                          }))
+                        }
+                      >
+                        <option value="solid">Solid</option>
+                        <option value="dashed">Dashed</option>
+                        <option value="dotted">Dotted</option>
+                      </select>
+                    </label>
+                    {selectedAnnotation.type === "highlighter" ? (
+                      <label>
+                        Opacity
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={selectedAnnotation.opacity}
+                          onChange={(event) =>
+                            updateSelectedAnnotation((annotation) =>
+                              annotation.type === "highlighter"
+                                ? { ...annotation, opacity: Number(event.target.value) }
+                                : annotation,
+                            )
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <span>Pin #{pinNumberById.get(selectedAnnotation.id) ?? "-"}</span>
+                    <label>
+                      Title
+                      <input
+                        type="text"
+                        value={selectedAnnotation.title}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) =>
+                            annotation.type === "pin" ? { ...annotation, title: event.target.value } : annotation,
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      Description
+                      <input
+                        type="text"
+                        value={selectedAnnotation.description}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) =>
+                            annotation.type === "pin"
+                              ? { ...annotation, description: event.target.value }
+                              : annotation,
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      Status
+                      <select value={selectedAnnotation.status} onChange={(event) => applyPinStatus(event.target.value as PinStatus)}>
+                        <option value="open">Open</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                    </label>
+                    <label>
+                      Scheduled
+                      <input
+                        type="date"
+                        value={selectedAnnotation.scheduledFor}
+                        onChange={(event) =>
+                          updateSelectedAnnotation((annotation) =>
+                            annotation.type === "pin"
+                              ? { ...annotation, scheduledFor: event.target.value }
+                              : annotation,
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="uploadLabel">
+                      Pin photo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const result = reader.result;
+                            if (typeof result !== "string") return;
+                            updateSelectedAnnotation((annotation) =>
+                              annotation.type === "pin"
+                                ? { ...annotation, photoDataUrl: result }
+                                : annotation,
+                            );
+                          };
+                          reader.readAsDataURL(file);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
                         updateSelectedAnnotation((annotation) =>
-                          annotation.type === "highlighter"
-                            ? { ...annotation, opacity: Number(event.target.value) }
-                            : annotation,
+                          annotation.type === "pin" ? { ...annotation, photoDataUrl: undefined } : annotation,
                         )
                       }
-                    />
-                  </label>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <span>Pin #{pinNumberById.get(selectedAnnotation.id) ?? "-"}</span>
-                <label>
-                  Title
-                  <input
-                    type="text"
-                    value={selectedAnnotation.title}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) =>
-                        annotation.type === "pin" ? { ...annotation, title: event.target.value } : annotation,
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  Description
-                  <input
-                    type="text"
-                    value={selectedAnnotation.description}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) =>
-                        annotation.type === "pin"
-                          ? { ...annotation, description: event.target.value }
-                          : annotation,
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  Status
-                  <select value={selectedAnnotation.status} onChange={(event) => applyPinStatus(event.target.value as PinStatus)}>
-                    <option value="open">Open</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="scheduled">Scheduled</option>
-                    <option value="closed">Closed</option>
-                  </select>
-                </label>
-                <label>
-                  Scheduled
-                  <input
-                    type="date"
-                    value={selectedAnnotation.scheduledFor}
-                    onChange={(event) =>
-                      updateSelectedAnnotation((annotation) =>
-                        annotation.type === "pin"
-                          ? { ...annotation, scheduledFor: event.target.value }
-                          : annotation,
-                      )
-                    }
-                  />
-                </label>
-                <label className="uploadLabel">
-                  Pin photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        const result = reader.result;
-                        if (typeof result !== "string") return;
-                        updateSelectedAnnotation((annotation) =>
-                          annotation.type === "pin"
-                            ? { ...annotation, photoDataUrl: result }
-                            : annotation,
-                        );
-                      };
-                      reader.readAsDataURL(file);
-                      event.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateSelectedAnnotation((annotation) =>
-                      annotation.type === "pin" ? { ...annotation, photoDataUrl: undefined } : annotation,
-                    )
-                  }
-                >
-                  Remove photo
-                </button>
-                {selectedAnnotation.photoDataUrl ? (
-                  <img src={selectedAnnotation.photoDataUrl} alt="Pin attachment" className="pinPhotoPreview" />
-                ) : null}
-              </>
-            )}
+                    >
+                      Remove photo
+                    </button>
+                    {selectedAnnotation.photoDataUrl ? (
+                      <img src={selectedAnnotation.photoDataUrl} alt="Pin attachment" className="pinPhotoPreview" />
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </details>
           </div>
         ) : null}
         </div>

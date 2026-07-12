@@ -279,7 +279,42 @@ label {
 }
 
 .panel-selected {
-  grid-column: 1 / -1;
+  max-width: 440px;
+  justify-self: end;
+  align-items: stretch;
+}
+
+.selectedDetails {
+  width: 100%;
+}
+
+.selectedDetails summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #dbeafe;
+  padding: 0.2rem 0.1rem;
+}
+
+.selectedDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.selectedMeta {
+  font-size: 0.7rem;
+  color: #9fb2cd;
+  font-weight: 500;
+}
+
+.selectedDetailsBody {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
 }
 
 @media (max-width: 980px) {
