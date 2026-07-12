@@ -89,7 +89,7 @@ function App() {
   const [stampImageDataUrl, setStampImageDataUrl] = useState<string | null>(null);
   const [stampOpacity, setStampOpacity] = useState<number>(0.95);
   const [activeStampPresetId, setActiveStampPresetId] = useState<string>("approved");
-  const [projectFileHandle, setProjectFileHandle] = useState<any | null>(null);
+  const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -203,14 +203,6 @@ function App() {
     setSelectedId(null);
   }
 
-  function bytesToBase64(bytes: Uint8Array): string {
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 1) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
   function base64ToBytes(base64: string): Uint8Array {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -224,7 +216,7 @@ function App() {
     const data = new Uint8Array(await file.arrayBuffer());
     await loadPdfBytes(data, file.name);
     setAnnotations([]);
-    setProjectFileHandle(null);
+    setPdfFileHandle(null);
   }
 
   async function handleProjectOpen(parsed: EditorProjectDocument): Promise<void> {
@@ -283,61 +275,10 @@ function App() {
       if (!handle) return;
       const file = await handle.getFile();
       const opened = await handleOpenFile(file);
-      setProjectFileHandle(opened === "project" ? handle : null);
+      setPdfFileHandle(opened === "pdf" ? handle : null);
       return;
     }
     openInputRef.current?.click();
-  }
-
-  function buildProjectDocument(): EditorProjectDocument | null {
-    if (!pdfBytes) return null;
-    return {
-      schemaVersion: 1,
-      kind: "pdfmaker-project",
-      fileName: pdfName,
-      createdAt: new Date().toISOString(),
-      pdfData: bytesToBase64(pdfBytes),
-      annotations: sortedAnnotations,
-    };
-  }
-
-  async function saveProjectToHandle(handle: any): Promise<void> {
-    const payload = buildProjectDocument();
-    if (!payload) return;
-    const writable = await handle.createWritable();
-    await writable.write(JSON.stringify(payload, null, 2));
-    await writable.close();
-  }
-
-  async function saveProject(): Promise<void> {
-    if (!pdfBytes) return;
-    if (projectFileHandle) {
-      await saveProjectToHandle(projectFileHandle);
-      return;
-    }
-    await saveProjectAs();
-  }
-
-  async function saveProjectAs(): Promise<void> {
-    const payload = buildProjectDocument();
-    if (!payload) return;
-    if (typeof (window as any).showSaveFilePicker === "function") {
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: `${pdfName.replace(/\.pdf$/i, "")}.pdfmaker.json`,
-        types: [
-          {
-            description: "PDFMaker project",
-            accept: { "application/json": [".pdfmaker.json", ".json"] },
-          },
-        ],
-      });
-      if (!handle) return;
-      await saveProjectToHandle(handle);
-      setProjectFileHandle(handle);
-      return;
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pdfmaker.json`);
   }
 
   function getEventPoint(event: React.PointerEvent<SVGSVGElement>, page: number): Point | null {
@@ -703,8 +644,14 @@ function App() {
     return bytes;
   }
 
-  async function exportFlattenedPdf(): Promise<void> {
-    if (!pdfBytes) return;
+  function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    const normalized = new Uint8Array(bytes.byteLength);
+    normalized.set(bytes);
+    return normalized.buffer;
+  }
+
+  async function buildFlattenedPdfBytes(): Promise<Uint8Array | null> {
+    if (!pdfBytes) return null;
     const output = await PDFDocument.load(pdfBytes);
     const pages = output.getPages();
     const imageCache = new Map<string, Awaited<ReturnType<typeof output.embedPng>>>();
@@ -846,9 +793,55 @@ function App() {
     }
 
     const flattenedBytes = await output.save();
-    const normalizedBytes = new Uint8Array(flattenedBytes);
+    return new Uint8Array(flattenedBytes);
+  }
+
+  async function savePdfToHandle(handle: any): Promise<void> {
+    const bytes = await buildFlattenedPdfBytes();
+    if (!bytes) return;
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }));
+    await writable.close();
+  }
+
+  async function savePdf(): Promise<void> {
+    if (!pdfDoc) return;
+    if (pdfFileHandle) {
+      await savePdfToHandle(pdfFileHandle);
+      return;
+    }
+    await savePdfAs();
+  }
+
+  async function savePdfAs(): Promise<void> {
+    const bytes = await buildFlattenedPdfBytes();
+    if (!bytes) return;
+    if (typeof (window as any).showSaveFilePicker === "function") {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
+        types: [
+          {
+            description: "PDF file",
+            accept: { "application/pdf": [".pdf"] },
+          },
+        ],
+      });
+      if (!handle) return;
+      await savePdfToHandle(handle);
+      setPdfFileHandle(handle);
+      return;
+    }
     downloadBlob(
-      new Blob([normalizedBytes.buffer], { type: "application/pdf" }),
+      new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
+      `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
+    );
+  }
+
+  async function exportFlattenedPdf(): Promise<void> {
+    const bytes = await buildFlattenedPdfBytes();
+    if (!bytes) return;
+    downloadBlob(
+      new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
       `${pdfName.replace(/\.pdf$/i, "")}-flattened.pdf`,
     );
   }
@@ -1201,14 +1194,14 @@ function App() {
             onChange={(event) => {
               const file = event.target.files?.[0] ?? null;
               void handleOpenFile(file);
-              setProjectFileHandle(null);
+              setPdfFileHandle(null);
               event.currentTarget.value = "";
             }}
           />
-          <button type="button" onClick={() => void saveProject()} disabled={!pdfDoc}>
+          <button type="button" onClick={() => void savePdf()} disabled={!pdfDoc}>
             Save
           </button>
-          <button type="button" onClick={() => void saveProjectAs()} disabled={!pdfDoc}>
+          <button type="button" onClick={() => void savePdfAs()} disabled={!pdfDoc}>
             Save As
           </button>
           <label className="uploadLabel">

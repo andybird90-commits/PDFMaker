@@ -35,8 +35,8 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
 - Load markups from JSON
 - Full file workflow:
   - Open (PDF, project JSON, or markup JSON)
-  - Save (project JSON with embedded PDF + annotations)
-  - Save As (project JSON)
+  - Save (writes annotated flattened `.pdf`)
+  - Save As (writes annotated flattened `.pdf`)
 - Export annotated pages as PNG snapshots
 - Export a flattened PDF with markups burned in
 
