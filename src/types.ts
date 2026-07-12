@@ -102,6 +102,7 @@ export type MarkupDocument = {
   createdAt: string;
   annotations: Annotation[];
   calibrationByPage?: Record<number, number>;
+  rotationByPage?: Record<number, number>;
 };
 
 export type EditorProjectDocument = {
@@ -112,4 +113,5 @@ export type EditorProjectDocument = {
   pdfData: string;
   annotations: Annotation[];
   calibrationByPage?: Record<number, number>;
+  rotationByPage?: Record<number, number>;
 };

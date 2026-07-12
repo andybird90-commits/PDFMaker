@@ -58,6 +58,7 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - Save (writes annotated flattened `.pdf`)
   - Save As (writes annotated flattened `.pdf`)
 - Rotate drawing controls for selected annotations (left/right)
+- Rotate sheet controls (left/right) for the active page
 - Calibrate & measure workflow:
   - calibrate page scale in millimeters by drawing a known-length line
   - measure distance (mm) and rectangular area (mm²)

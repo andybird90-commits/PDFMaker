@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, degrees, rgb } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
@@ -54,6 +54,7 @@ type BatchDocument = {
   bytes: Uint8Array;
   annotations: Annotation[];
   calibrationByPage: Record<number, number>;
+  rotationByPage: Record<number, number>;
 };
 
 const DEFAULT_STROKE_WIDTH = 2;
@@ -110,8 +111,10 @@ function App() {
   const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
   const [actionNotice, setActionNotice] = useState<string>("");
   const [calibrationByPage, setCalibrationByPage] = useState<Record<number, number>>({});
+  const [rotationByPage, setRotationByPage] = useState<Record<number, number>>({});
   const [batchDocuments, setBatchDocuments] = useState<BatchDocument[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string>("");
+  const [activePage, setActivePage] = useState<number>(1);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -169,7 +172,7 @@ function App() {
     () => customStamps.find((stamp) => stamp.id === activeCustomStampId) ?? null,
     [customStamps, activeCustomStampId],
   );
-  const activePageForTools = selectedAnnotation?.page ?? 1;
+  const activePageForTools = selectedAnnotation?.page ?? activePage;
   const activeCalibration = calibrationByPage[activePageForTools];
 
   useEffect(() => {
@@ -219,10 +222,12 @@ function App() {
     if (!activeBatchId || suppressBatchSyncRef.current) return;
     setBatchDocuments((prev) =>
       prev.map((document) =>
-        document.id === activeBatchId ? { ...document, annotations, calibrationByPage } : document,
+        document.id === activeBatchId
+          ? { ...document, annotations, calibrationByPage, rotationByPage }
+          : document,
       ),
     );
-  }, [annotations, calibrationByPage, activeBatchId]);
+  }, [annotations, calibrationByPage, rotationByPage, activeBatchId]);
 
   function statusLabel(status: PinStatus): string {
     if (status === "in_progress") return "In progress";
@@ -273,7 +278,8 @@ function App() {
         }
 
         const page = await currentDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale });
+        const rotation = rotationByPage[pageNum] ?? 0;
+        const viewport = page.getViewport({ scale, rotation });
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           continue;
@@ -295,7 +301,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, pageCount, scale]);
+  }, [pdfDoc, pageCount, scale, rotationByPage]);
 
   useEffect(() => {
     if (!pdfDoc || pageCount === 0) {
@@ -366,6 +372,7 @@ function App() {
       bytes: data,
       annotations: [],
       calibrationByPage: {},
+      rotationByPage: {},
     };
     suppressBatchSyncRef.current = true;
     setBatchDocuments([document]);
@@ -373,6 +380,8 @@ function App() {
     await loadPdfBytes(data, file.name);
     setAnnotations(document.annotations);
     setCalibrationByPage({});
+    setRotationByPage({});
+    setActivePage(1);
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
   }
@@ -386,6 +395,7 @@ function App() {
         bytes: new Uint8Array(await file.arrayBuffer()),
         annotations: [] as Annotation[],
         calibrationByPage: {},
+        rotationByPage: {},
       })),
     );
     if (batch.length === 0) return;
@@ -395,6 +405,8 @@ function App() {
     await loadPdfBytes(batch[0].bytes, batch[0].name);
     setAnnotations([]);
     setCalibrationByPage(batch[0].calibrationByPage);
+    setRotationByPage(batch[0].rotationByPage);
+    setActivePage(1);
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
     notify(`Loaded batch of ${batch.length} PDFs.`);
@@ -408,6 +420,8 @@ function App() {
     await loadPdfBytes(target.bytes, target.name);
     setAnnotations(target.annotations);
     setCalibrationByPage(target.calibrationByPage);
+    setRotationByPage(target.rotationByPage);
+    setActivePage(1);
     setSelectedId(null);
     suppressBatchSyncRef.current = false;
     setPdfFileHandle(null);
@@ -427,6 +441,7 @@ function App() {
       bytes,
       annotations: normalizedAnnotations,
       calibrationByPage: parsed.calibrationByPage ?? {},
+      rotationByPage: parsed.rotationByPage ?? {},
     };
     suppressBatchSyncRef.current = true;
     setBatchDocuments([document]);
@@ -434,6 +449,8 @@ function App() {
     await loadPdfBytes(bytes, document.name);
     setAnnotations(normalizedAnnotations);
     setCalibrationByPage(document.calibrationByPage);
+    setRotationByPage(document.rotationByPage);
+    setActivePage(1);
     suppressBatchSyncRef.current = false;
   }
 
@@ -454,6 +471,7 @@ function App() {
         (parsed as MarkupDocument).annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
       );
       setCalibrationByPage((parsed as MarkupDocument).calibrationByPage ?? {});
+      setRotationByPage((parsed as MarkupDocument).rotationByPage ?? {});
       setSelectedId(null);
       return "markups";
     }
@@ -605,6 +623,7 @@ function App() {
 
   function onPointerDown(page: number, event: React.PointerEvent<SVGSVGElement>): void {
     if (event.button !== 0) return;
+    setActivePage(page);
     if (tool === "select") {
       setSelectedId(null);
       return;
@@ -1013,6 +1032,63 @@ function App() {
     return { x: clamp01(center.x - dy), y: clamp01(center.y + dx) };
   }
 
+  function rotatePointUnit(point: Point, direction: "cw" | "ccw"): Point {
+    if (direction === "cw") {
+      return { x: clamp01(point.y), y: clamp01(1 - point.x) };
+    }
+    return { x: clamp01(1 - point.y), y: clamp01(point.x) };
+  }
+
+  function rotateSheet(direction: "cw" | "ccw"): void {
+    const page = activePageForTools;
+    setAnnotations((prev) =>
+      prev.map((annotation) => {
+        if (annotation.page !== page) return annotation;
+        if (annotation.type === "line" || annotation.type === "arrow") {
+          return {
+            ...annotation,
+            start: rotatePointUnit(annotation.start, direction),
+            end: rotatePointUnit(annotation.end, direction),
+          };
+        }
+        if (annotation.type === "rect" || annotation.type === "cloud" || annotation.type === "measure") {
+          return {
+            ...annotation,
+            start: rotatePointUnit(annotation.start, direction),
+            end: rotatePointUnit(annotation.end, direction),
+          };
+        }
+        if (annotation.type === "highlighter") {
+          return {
+            ...annotation,
+            points: annotation.points.map((point) => rotatePointUnit(point, direction)),
+          };
+        }
+        if (annotation.type === "stamp") {
+          return {
+            ...annotation,
+            position: rotatePointUnit(annotation.position, direction),
+            width: annotation.height,
+            height: annotation.width,
+          };
+        }
+        if (annotation.type === "pin") {
+          return {
+            ...annotation,
+            position: rotatePointUnit(annotation.position, direction),
+          };
+        }
+        return annotation;
+      }),
+    );
+    setRotationByPage((prev) => {
+      const current = prev[page] ?? 0;
+      const next = direction === "cw" ? (current + 90) % 360 : (current + 270) % 360;
+      return { ...prev, [page]: next };
+    });
+    notify(`Rotated sheet page ${page} ${direction === "cw" ? "right" : "left"}.`);
+  }
+
   function rotateSelectedDrawing(direction: "cw" | "ccw"): void {
     const target = selectedAnnotation ?? lastRotatableAnnotation;
     if (!target) {
@@ -1091,6 +1167,7 @@ function App() {
       createdAt: new Date().toISOString(),
       annotations: sortedAnnotations,
       calibrationByPage,
+      rotationByPage,
     };
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
     downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.markups.json`);
@@ -1107,6 +1184,7 @@ function App() {
       parsed.annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
     );
     setCalibrationByPage(parsed.calibrationByPage ?? {});
+    setRotationByPage(parsed.rotationByPage ?? {});
     setSelectedId(null);
   }
 
@@ -1242,6 +1320,10 @@ function App() {
       const pageNo = pageIndex + 1;
       const { width, height } = page.getSize();
       const pageAnnotations = annotations.filter((annotation) => annotation.page === pageNo);
+      const pageRotation = rotationByPage[pageNo] ?? 0;
+      if (pageRotation !== 0) {
+        page.setRotation(degrees(pageRotation));
+      }
 
       for (const annotation of pageAnnotations) {
         const color = toPdfColor(annotation.color);
@@ -2209,6 +2291,12 @@ function App() {
             Clear Calib
           </button>
           <span>{activeCalibration ? `Calib p${activePageForTools}: ${activeCalibration.toFixed(1)} mm/unit` : "Not calibrated"}</span>
+          <button type="button" onClick={() => rotateSheet("ccw")} disabled={!pdfDoc}>
+            Rotate Sheet Left
+          </button>
+          <button type="button" onClick={() => rotateSheet("cw")} disabled={!pdfDoc}>
+            Rotate Sheet Right
+          </button>
           <button type="button" onClick={() => rotateSelectedDrawing("ccw")} disabled={!lastRotatableAnnotation}>
             Rotate Left
           </button>
@@ -2475,7 +2563,10 @@ function App() {
                   key={`thumb-${page}`}
                   type="button"
                   className="thumbButton"
-                  onClick={() => pageRefs.current[page]?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  onClick={() => {
+                    setActivePage(page);
+                    pageRefs.current[page]?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
                 >
                   <span>Page {page}</span>
                   {thumbnails[page] ? <img src={thumbnails[page]} alt={`Page ${page} thumbnail`} /> : null}
@@ -2504,6 +2595,7 @@ function App() {
                       pageRefs.current[page] = el;
                     }}
                     className="pageSection"
+                    onMouseEnter={() => setActivePage(page)}
                   >
                     <div className="pageHeader">
                       <h3>
