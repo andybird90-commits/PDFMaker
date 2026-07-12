@@ -100,6 +100,7 @@ function App() {
   const [customStamps, setCustomStamps] = useState<CustomStamp[]>([]);
   const [activeCustomStampId, setActiveCustomStampId] = useState<string>("");
   const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
+  const [actionNotice, setActionNotice] = useState<string>("");
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -595,15 +596,22 @@ function App() {
   }
 
   function exportPinsJson(): void {
-    const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
-    const payload = {
-      schemaVersion: 1,
-      fileName: pdfName,
-      exportedAt: new Date().toISOString(),
-      pins,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.json`);
+    try {
+      const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
+      const payload = {
+        schemaVersion: 1,
+        fileName: pdfName,
+        exportedAt: new Date().toISOString(),
+        pins,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.json`);
+      notify("Pins JSON exported.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`Pins JSON export failed: ${message}`);
+      window.alert(`Pins JSON export failed:\n${message}`);
+    }
   }
 
   function csvEscape(value: string): string {
@@ -614,36 +622,43 @@ function App() {
   }
 
   function exportPinsCsv(): void {
-    const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
-    const header = [
-      "Pin Number",
-      "Pin ID",
-      "Page",
-      "Title",
-      "Description",
-      "Status",
-      "Scheduled For",
-      "Created At",
-      "Has Photo",
-      "X",
-      "Y",
-    ];
-    const rows = pins.map((pin) => [
-      String(pinNumberById.get(pin.id) ?? ""),
-      pin.id,
-      String(pin.page),
-      pin.title,
-      pin.description,
-      statusLabel(pin.status),
-      pin.scheduledFor,
-      pin.createdAt,
-      pin.photoDataUrl ? "Yes" : "No",
-      pin.position.x.toFixed(4),
-      pin.position.y.toFixed(4),
-    ]);
-    const csv = [header, ...rows].map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.csv`);
+    try {
+      const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
+      const header = [
+        "Pin Number",
+        "Pin ID",
+        "Page",
+        "Title",
+        "Description",
+        "Status",
+        "Scheduled For",
+        "Created At",
+        "Has Photo",
+        "X",
+        "Y",
+      ];
+      const rows = pins.map((pin) => [
+        String(pinNumberById.get(pin.id) ?? ""),
+        pin.id,
+        String(pin.page),
+        pin.title,
+        pin.description,
+        statusLabel(pin.status),
+        pin.scheduledFor,
+        pin.createdAt,
+        pin.photoDataUrl ? "Yes" : "No",
+        pin.position.x.toFixed(4),
+        pin.position.y.toFixed(4),
+      ]);
+      const csv = [header, ...rows].map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.csv`);
+      notify("Pins CSV exported.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`Pins CSV export failed: ${message}`);
+      window.alert(`Pins CSV export failed:\n${message}`);
+    }
   }
 
   function onViewportWheel(event: React.WheelEvent<HTMLElement>): void {
@@ -679,6 +694,18 @@ function App() {
   function closeAllMenus(): void {
     const openMenus = document.querySelectorAll<HTMLDetailsElement>(".menuItem[open]");
     openMenus.forEach((menu) => menu.removeAttribute("open"));
+  }
+
+  function notify(message: string): void {
+    setActionNotice(message);
+    window.setTimeout(() => {
+      setActionNotice((prev) => (prev === message ? "" : prev));
+    }, 4500);
+  }
+
+  function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return String(error);
   }
 
   function onViewportMouseDown(event: React.MouseEvent<HTMLElement>): void {
@@ -765,36 +792,44 @@ function App() {
   }
 
   async function exportAnnotatedPngs(): Promise<void> {
-    for (let page = 1; page <= pageCount; page += 1) {
-      const baseCanvas = canvasRefs.current[page];
-      const svg = svgRefs.current[page];
-      const size = pageSizes[page];
-      if (!baseCanvas || !svg || !size) {
-        continue;
+    try {
+      for (let page = 1; page <= pageCount; page += 1) {
+        const baseCanvas = canvasRefs.current[page];
+        const svg = svgRefs.current[page];
+        const size = pageSizes[page];
+        if (!baseCanvas || !svg || !size) {
+          continue;
+        }
+
+        const output = document.createElement("canvas");
+        output.width = size.width;
+        output.height = size.height;
+        const ctx = output.getContext("2d");
+        if (!ctx) continue;
+        ctx.drawImage(baseCanvas, 0, 0);
+
+        const serialized = new XMLSerializer().serializeToString(svg);
+        const svgBlob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = svgUrl;
+        });
+        ctx.drawImage(image, 0, 0);
+        URL.revokeObjectURL(svgUrl);
+
+        const pngBlob = await new Promise<Blob | null>((resolve) => output.toBlob(resolve, "image/png"));
+        if (!pngBlob) continue;
+        downloadBlob(pngBlob, `${pdfName.replace(/\.pdf$/i, "")}-page-${page}.png`);
       }
-
-      const output = document.createElement("canvas");
-      output.width = size.width;
-      output.height = size.height;
-      const ctx = output.getContext("2d");
-      if (!ctx) continue;
-      ctx.drawImage(baseCanvas, 0, 0);
-
-      const serialized = new XMLSerializer().serializeToString(svg);
-      const svgBlob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
-      const svgUrl = URL.createObjectURL(svgBlob);
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = svgUrl;
-      });
-      ctx.drawImage(image, 0, 0);
-      URL.revokeObjectURL(svgUrl);
-
-      const pngBlob = await new Promise<Blob | null>((resolve) => output.toBlob(resolve, "image/png"));
-      if (!pngBlob) continue;
-      downloadBlob(pngBlob, `${pdfName.replace(/\.pdf$/i, "")}-page-${page}.png`);
+      notify("PNG export started.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`PNG export failed: ${message}`);
+      console.error("PNG export failed", error);
+      window.alert(`PNG export failed:\n${message}`);
     }
   }
 
@@ -840,6 +875,25 @@ function App() {
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  async function dataUrlToPngBytes(dataUrl: string): Promise<Uint8Array> {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Could not decode image data."));
+      img.src = dataUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Could not create image conversion canvas.");
+    }
+    ctx.drawImage(image, 0, 0);
+    const pngDataUrl = canvas.toDataURL("image/png");
+    return dataUrlToBytes(pngDataUrl);
   }
 
   function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -958,7 +1012,9 @@ function App() {
             const embedded = cached
               ?? (annotation.imageDataUrl.includes("image/png")
                 ? await output.embedPng(dataUrlToBytes(annotation.imageDataUrl))
-                : await output.embedJpg(dataUrlToBytes(annotation.imageDataUrl)));
+                : annotation.imageDataUrl.includes("image/jpeg") || annotation.imageDataUrl.includes("image/jpg")
+                  ? await output.embedJpg(dataUrlToBytes(annotation.imageDataUrl))
+                  : await output.embedPng(await dataUrlToPngBytes(annotation.imageDataUrl)));
             imageCache.set(annotation.imageDataUrl, embedded);
             page.drawImage(embedded, {
               x,
@@ -1031,45 +1087,79 @@ function App() {
   }
 
   async function savePdf(): Promise<void> {
-    if (!pdfDoc) return;
-    if (pdfFileHandle) {
-      await savePdfToHandle(pdfFileHandle);
-      return;
+    try {
+      if (!pdfDoc) {
+        notify("Open a PDF before saving.");
+        return;
+      }
+      if (pdfFileHandle) {
+        await savePdfToHandle(pdfFileHandle);
+        notify("Saved PDF successfully.");
+        return;
+      }
+      await savePdfAs();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`Save failed: ${message}`);
+      console.error("Save failed", error);
+      window.alert(`Save failed:\n${message}`);
     }
-    await savePdfAs();
   }
 
   async function savePdfAs(): Promise<void> {
-    const bytes = await buildFlattenedPdfBytes();
-    if (!bytes) return;
-    if (typeof (window as any).showSaveFilePicker === "function") {
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
-        types: [
-          {
-            description: "PDF file",
-            accept: { "application/pdf": [".pdf"] },
-          },
-        ],
-      });
-      if (!handle) return;
-      await savePdfToHandle(handle);
-      setPdfFileHandle(handle);
-      return;
+    try {
+      const bytes = await buildFlattenedPdfBytes();
+      if (!bytes) {
+        notify("Open a PDF before Save As.");
+        return;
+      }
+      if (typeof (window as any).showSaveFilePicker === "function") {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
+          types: [
+            {
+              description: "PDF file",
+              accept: { "application/pdf": [".pdf"] },
+            },
+          ],
+        });
+        if (!handle) return;
+        await savePdfToHandle(handle);
+        setPdfFileHandle(handle);
+        notify("Save As completed.");
+        return;
+      }
+      downloadBlob(
+        new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
+        `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
+      );
+      notify("Save As download started.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`Save As failed: ${message}`);
+      console.error("Save As failed", error);
+      window.alert(`Save As failed:\n${message}`);
     }
-    downloadBlob(
-      new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
-      `${pdfName.replace(/\.pdf$/i, "")}-annotated.pdf`,
-    );
   }
 
   async function exportFlattenedPdf(): Promise<void> {
-    const bytes = await buildFlattenedPdfBytes();
-    if (!bytes) return;
-    downloadBlob(
-      new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
-      `${pdfName.replace(/\.pdf$/i, "")}-flattened.pdf`,
-    );
+    try {
+      const bytes = await buildFlattenedPdfBytes();
+      if (!bytes) {
+        notify("Open a PDF before export.");
+        return;
+      }
+      downloadBlob(
+        new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }),
+        `${pdfName.replace(/\.pdf$/i, "")}-flattened.pdf`,
+      );
+      notify("Exported flattened PDF.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      notify(`Export failed: ${message}`);
+      console.error("Export failed", error);
+      window.alert(`Export failed:\n${message}`);
+    }
   }
 
   function onPointerMove(page: number, event: React.PointerEvent<SVGSVGElement>): void {
@@ -1450,6 +1540,7 @@ function App() {
   return (
     <div className="app">
       <header className="toolbar">
+        {actionNotice ? <div className="actionNotice">{actionNotice}</div> : null}
         <nav className="menuBar" aria-label="Application menu" onMouseLeave={closeAllMenus}>
           <details className="menuItem" onMouseLeave={closeAllMenus}>
             <summary>File</summary>

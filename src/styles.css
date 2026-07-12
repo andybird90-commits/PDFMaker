@@ -39,6 +39,17 @@ body {
   z-index: 3;
 }
 
+.actionNotice {
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  margin-bottom: 0.2rem;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
 .menuBar {
   width: 100%;
   display: flex;
