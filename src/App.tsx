@@ -383,6 +383,7 @@ function App() {
   const [projectPreviewUrl, setProjectPreviewUrl] = useState<string>("");
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
   const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
+  const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -787,19 +788,26 @@ function App() {
 
   useEffect(() => {
     if (hasSupabaseConfig && supabase) return;
-    window.localStorage.setItem(
-      OPS_STORAGE_KEY,
-      JSON.stringify({
-        workers,
-        timeEntries,
-        projects,
-        projectMembers,
-        projectActivities,
-        projectFileVersions,
-        folders,
-        projectFiles,
-      }),
-    );
+    try {
+      window.localStorage.setItem(
+        OPS_STORAGE_KEY,
+        JSON.stringify({
+          workers,
+          timeEntries,
+          projects,
+          projectMembers,
+          projectActivities,
+          projectFileVersions,
+          folders,
+          projectFiles,
+        }),
+      );
+    } catch (error) {
+      if (!opsStorageWarnedRef.current) {
+        opsStorageWarnedRef.current = true;
+        notify(`Local storage is full. Uploaded files still exist in this session only. (${getErrorMessage(error)})`);
+      }
+    }
   }, [workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
 
   useEffect(() => {
@@ -2125,7 +2133,13 @@ function App() {
 
   async function handleProjectFileUpload(files: FileList | File[] | null, targetFileId?: string): Promise<void> {
     if (!files || files.length === 0) return;
+    if (!projectPermission.uploadFiles) {
+      notify("You do not have permission to upload files.");
+      return;
+    }
     const queue = Array.from(files);
+    notify(`Uploading ${queue.length} file${queue.length === 1 ? "" : "s"}...`);
+    let uploadedCount = 0;
     for (const file of queue) {
       try {
         const dataUrl = await fileToDataUrl(file);
@@ -2169,11 +2183,15 @@ function App() {
           uploadedBy: CURRENT_USER.name,
           fileSize: file.size,
         });
+        uploadedCount += 1;
       } catch (error) {
         notify(`Upload failed: ${getErrorMessage(error)}`);
       }
     }
     setVersionUploadTargetId(null);
+    if (uploadedCount > 0) {
+      notify(`Uploaded ${uploadedCount} file${uploadedCount === 1 ? "" : "s"} successfully.`);
+    }
   }
 
   function deleteProjectFile(fileId: string): void {
@@ -3911,6 +3929,7 @@ function App() {
                   >
                     Upload
                   </button>
+                  {!projectPermission.uploadFiles ? <small className="opsSubtle">Upload disabled by project permission</small> : null}
                   <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
                     New Folder
                   </button>
