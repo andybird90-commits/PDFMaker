@@ -953,6 +953,7 @@ label {
 .opsFolderTreeRow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.25rem;
   border: 1px solid #273f5a;
   border-radius: 6px;
@@ -981,13 +982,14 @@ label {
 .opsFolderTreeActions {
   display: flex;
   gap: 0.15rem;
+  flex-wrap: wrap;
 }
 
 .opsFolderTreeActions button {
   min-height: 24px;
-  min-width: 24px;
-  padding: 0.1rem;
-  font-size: 0.65rem;
+  min-width: 44px;
+  padding: 0.1rem 0.25rem;
+  font-size: 0.62rem;
 }
 
 .opsFileRows {

@@ -1813,12 +1813,15 @@ function App() {
     );
   }
 
-  async function addFolder(): Promise<void> {
+  async function addFolder(options?: { name?: string; parentId?: string | null }): Promise<void> {
     if (!projectPermission.manageFolders) {
       notify("You do not have permission to manage folders.");
       return;
     }
-    const name = newFolderName.trim();
+    const fallbackName = window.prompt("Folder name", "")?.trim() ?? "";
+    const preferredName = options?.name ?? newFolderName.trim();
+    const name = (preferredName || fallbackName).trim();
+    const parentId = options?.parentId ?? selectedFolderId;
     if (!name) {
       notify("Enter folder name.");
       return;
@@ -1828,7 +1831,7 @@ function App() {
       try {
         const { data, error } = await supabase
           .from("folders")
-          .insert({ name, parent_id: selectedFolderId })
+          .insert({ name, parent_id: parentId })
           .select("id,name,parent_id")
           .single();
         if (error) throw error;
@@ -1840,7 +1843,7 @@ function App() {
         };
         setFolders((prev) => [folder, ...prev]);
         setNewFolderName("");
-        if (!selectedFolderId) {
+        if (!parentId) {
           setSelectedFolderId(folder.id);
         }
       } catch (error) {
@@ -1854,11 +1857,11 @@ function App() {
       id: makeId(),
       projectId: selectedProjectId,
       name,
-      parentId: selectedFolderId,
+      parentId,
     };
     setFolders((prev) => [folder, ...prev]);
     setNewFolderName("");
-    if (!selectedFolderId) {
+    if (!parentId) {
       setSelectedFolderId(folder.id);
     }
     logProjectActivity("folder created", folder.name, selectedProjectId);
@@ -3899,17 +3902,26 @@ function App() {
                   {folder.name} <span>({fileCount})</span>
                 </button>
                 <div className="opsFolderTreeActions">
-                  <button type="button" onClick={() => setSelectedFolderId(folder.id)}>
-                    +
+                  <button
+                    type="button"
+                    title="Create subfolder"
+                    onClick={() => {
+                      const subfolderName = window.prompt(`New subfolder inside "${folder.name}"`, "")?.trim();
+                      if (!subfolderName) return;
+                      void addFolder({ name: subfolderName, parentId: folder.id });
+                      setExpandedFolderIds((prev) => ({ ...prev, [folder.id]: true }));
+                    }}
+                  >
+                    Sub
                   </button>
-                  <button type="button" onClick={() => renameFolder(folder.id)}>
-                    R
+                  <button type="button" title="Rename folder" onClick={() => renameFolder(folder.id)}>
+                    Rename
                   </button>
-                  <button type="button" onClick={() => moveFolder(folder.id)}>
-                    M
+                  <button type="button" title="Move folder" onClick={() => moveFolder(folder.id)}>
+                    Move
                   </button>
-                  <button type="button" onClick={() => deleteFolder(folder.id)}>
-                    D
+                  <button type="button" title="Delete folder" onClick={() => deleteFolder(folder.id)}>
+                    Delete
                   </button>
                 </div>
               </div>,
@@ -3961,15 +3973,19 @@ function App() {
             </section>
           );
         } else if (projectWorkspaceTab === "files") {
+          const activeFolderName =
+            selectedFolderId === null ? "All folders" : workspaceFolders.find((folder) => folder.id === selectedFolderId)?.name ?? "Folder";
           workspaceContent = (
             <div className="opsWorkspace3Col">
               <aside className="opsPanel opsWorkspacePanel">
+                <h3>Folders</h3>
+                <p className="opsSubtle">Choose a folder to filter files. Use "Sub" to create a child folder.</p>
                 <div className="opsInline">
                   <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
                     All Files
                   </button>
                   <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
-                    New Folder
+                    Create Folder
                   </button>
                 </div>
                 <div className="opsFolderTree">{renderFolderTree(null)}</div>
@@ -3983,27 +3999,29 @@ function App() {
                   void handleProjectFileUpload(event.dataTransfer.files);
                 }}
               >
+                <h3>Files in: {activeFolderName}</h3>
+                <p className="opsSubtle">Tap a file name to select it. PDFs open in the full markup editor.</p>
                 <div className="opsInline">
                   <button
                     type="button"
                     onClick={() => projectUploadInputRef.current?.click()}
                     disabled={!projectPermission.uploadFiles}
                   >
-                    Upload
+                    Upload Files
                   </button>
                   {!projectPermission.uploadFiles ? <small className="opsSubtle">Upload disabled by project permission</small> : null}
                   <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
-                    New Folder
+                    Create Folder
                   </button>
                   <input type="text" value={fileSearch} placeholder="Search files..." onChange={(event) => setFileSearch(event.target.value)} />
                   <select>
-                    <option>Filter</option>
+                    <option>Type: All files</option>
                     <option>PDF</option>
                     <option>Images</option>
                     <option>Docs</option>
                   </select>
                   <select>
-                    <option>Sort: Modified</option>
+                    <option>Sort by: Modified date</option>
                     <option>Name</option>
                     <option>Size</option>
                   </select>
@@ -4033,17 +4051,17 @@ function App() {
                         }}
                       >
                         <strong>{file.name}</strong>
-                        <small>v{file.version ?? 1}</small>
-                        <small>{file.mimeType ?? "Unknown"}</small>
-                        <small>{new Date(file.updatedAt).toLocaleDateString()}</small>
-                        <small>{file.uploadedBy ?? CURRENT_USER.name}</small>
+                        <small>
+                          Version {file.version ?? 1} • {file.mimeType ?? "Unknown"} • Updated{" "}
+                          {new Date(file.updatedAt).toLocaleDateString()} • By {file.uploadedBy ?? CURRENT_USER.name}
+                        </small>
                       </button>
                       <div className="opsInline opsFileRowActions">
                         <button
                           type="button"
                           onClick={() => void openProjectFileFullView(file, workspaceProject?.slug ?? "project")}
                         >
-                          Open
+                          {file.mimeType?.includes("pdf") || file.name.toLowerCase().endsWith(".pdf") ? "Open Editor" : "Open"}
                         </button>
                         <button type="button" onClick={() => downloadProjectFile(file)}>
                           Download
@@ -4083,14 +4101,14 @@ function App() {
               </section>
 
               <section className="opsPanel opsWorkspacePanel">
-                <h3>Preview / PDF Editor</h3>
+                <h3>Preview & Editor</h3>
                 {selectedProjectFile ? (
                   selectedProjectFile.mimeType?.includes("pdf") || selectedProjectFile.name.toLowerCase().endsWith(".pdf") ? (
                     <div className="opsFileDetails">
-                      <p>PDF drawings open in the full markup editor workspace.</p>
+                      <p>This is a PDF drawing. Open it in the full markup editor to review and add markups.</p>
                       <div className="opsInline">
                         <button type="button" onClick={() => void openProjectFileFullView(selectedProjectFile, workspaceProject?.slug ?? "project")}>
-                          Open in full editor
+                          Open Full Editor
                         </button>
                         <button type="button" onClick={() => downloadProjectFile(selectedProjectFile)}>
                           Download
@@ -4110,7 +4128,7 @@ function App() {
                     </div>
                   )
                 ) : (
-                  <p>Select a file to preview.</p>
+                  <p>Select a file from the middle column to preview or open it in the editor.</p>
                 )}
 
                 {versionHistoryFileId ? (
