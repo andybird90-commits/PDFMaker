@@ -41,7 +41,7 @@ export function buildCloudPath(
   type CloudAnchor = Point & { nx: number; ny: number };
   const points: CloudAnchor[] = [];
   const perimeter = 2 * (width + height);
-  const step = scallopRadius * 1.5;
+  const step = Math.max(4, scallopRadius * 1.1);
   const totalPoints = Math.max(8, Math.floor(perimeter / step));
 
   for (let i = 0; i < totalPoints; i += 1) {
@@ -71,23 +71,18 @@ export function buildCloudPath(
     return "";
   }
 
-  const bumpDistance = scallopRadius * 0.9;
-  const bumpPoints = points.map((point) => ({
-    x: point.x + point.nx * bumpDistance,
-    y: point.y + point.ny * bumpDistance,
-  }));
-
-  const firstMid = {
-    x: (bumpPoints[bumpPoints.length - 1].x + bumpPoints[0].x) / 2,
-    y: (bumpPoints[bumpPoints.length - 1].y + bumpPoints[0].y) / 2,
-  };
-
-  let path = `M ${firstMid.x} ${firstMid.y}`;
-  for (let i = 0; i < bumpPoints.length; i += 1) {
-    const current = bumpPoints[i];
-    const next = bumpPoints[(i + 1) % bumpPoints.length];
-    const mid = { x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 };
-    path += ` Q ${current.x} ${current.y}, ${mid.x} ${mid.y}`;
+  const bumpDistance = scallopRadius * 1.65;
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % points.length];
+    const mx = (current.x + next.x) / 2;
+    const my = (current.y + next.y) / 2;
+    const nx = (current.nx + next.nx) / 2;
+    const ny = (current.ny + next.ny) / 2;
+    const cx = mx + nx * bumpDistance;
+    const cy = my + ny * bumpDistance;
+    path += ` Q ${cx} ${cy}, ${next.x} ${next.y}`;
   }
   path += " Z";
   return path;

@@ -1384,7 +1384,7 @@ function App() {
               borderDashArray: dashArray,
             });
           } else {
-            const path = buildCloudPath(0, 0, w, h, Math.max(6, annotation.strokeWidth * 2));
+            const path = buildCloudPath(0, 0, w, h, Math.max(10, annotation.strokeWidth * 3.2));
             page.drawSvgPath(path, {
               x,
               y,
@@ -1767,7 +1767,7 @@ function App() {
       const start = denormalizePoint(annotation.start, size.width, size.height);
       const end = denormalizePoint(annotation.end, size.width, size.height);
       const rect = rectFromPoints(start, end);
-      const d = buildCloudPath(rect.x, rect.y, Math.max(rect.w, 8), Math.max(rect.h, 8));
+      const d = buildCloudPath(rect.x, rect.y, Math.max(rect.w, 8), Math.max(rect.h, 8), Math.max(10, annotation.strokeWidth * 3.2));
       return <path key={annotation.id} d={d} fill="transparent" {...commonProps} />;
     }
 
@@ -2055,7 +2055,7 @@ function App() {
 
     if (tool === "cloud") {
       const rect = rectFromPoints(start, current);
-      const d = buildCloudPath(rect.x, rect.y, Math.max(rect.w, 8), Math.max(rect.h, 8));
+      const d = buildCloudPath(rect.x, rect.y, Math.max(rect.w, 8), Math.max(rect.h, 8), Math.max(10, strokeWidth * 3.2));
       return <path d={d} fill="transparent" stroke={strokeColor} strokeWidth={strokeWidth} pointerEvents="none" />;
     }
 
