@@ -48,6 +48,17 @@ type InteractionState =
 
 type PageSize = { width: number; height: number };
 type CustomStamp = { id: string; name: string; dataUrl: string };
+type AppModule = "markup-studio" | "operations";
+type Worker = { id: string; name: string; role: string };
+type TimeEntry = {
+  id: string;
+  workerId: string;
+  action: "clock_in" | "clock_out";
+  at: string;
+  note?: string;
+};
+type FolderNode = { id: string; name: string; parentId: string | null };
+type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
 type BatchDocument = {
   id: string;
   name: string;
@@ -63,6 +74,7 @@ const DEFAULT_HIGHLIGHTER_COLOR = "#ffe45e";
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 4;
 const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
+const OPS_STORAGE_KEY = "mep-ops.local.v1";
 const PIN_STATUS_COLOR: Record<PinStatus, string> = {
   open: "#dc2626",
   in_progress: "#2563eb",
@@ -115,6 +127,16 @@ function App() {
   const [batchDocuments, setBatchDocuments] = useState<BatchDocument[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [activePage, setActivePage] = useState<number>(1);
+  const [activeModule, setActiveModule] = useState<AppModule>("markup-studio");
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [folders, setFolders] = useState<FolderNode[]>([]);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [newWorkerName, setNewWorkerName] = useState<string>("");
+  const [newWorkerRole, setNewWorkerRole] = useState<string>("Technician");
+  const [newFolderName, setNewFolderName] = useState<string>("");
+  const [newFileName, setNewFileName] = useState<string>("");
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -174,6 +196,14 @@ function App() {
   );
   const activePageForTools = activePage;
   const activeCalibration = calibrationByPage[activePageForTools];
+  const workerById = useMemo(
+    () => Object.fromEntries(workers.map((worker) => [worker.id, worker])),
+    [workers],
+  );
+  const visibleFiles = useMemo(
+    () => projectFiles.filter((file) => file.folderId === selectedFolderId),
+    [projectFiles, selectedFolderId],
+  );
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -196,6 +226,41 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STAMPS_STORAGE_KEY, JSON.stringify(customStamps));
   }, [customStamps]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(OPS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        workers?: Worker[];
+        timeEntries?: TimeEntry[];
+        folders?: FolderNode[];
+        projectFiles?: ProjectFile[];
+      };
+      setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
+      setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
+      const loadedFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
+      setFolders(loadedFolders);
+      setProjectFiles(Array.isArray(parsed.projectFiles) ? parsed.projectFiles : []);
+      if (loadedFolders.length > 0) {
+        setSelectedFolderId(loadedFolders[0].id);
+      }
+    } catch {
+      // Keep app usable if ops storage was malformed.
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      OPS_STORAGE_KEY,
+      JSON.stringify({
+        workers,
+        timeEntries,
+        folders,
+        projectFiles,
+      }),
+    );
+  }, [workers, timeEntries, folders, projectFiles]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1015,6 +1080,73 @@ function App() {
     if (!activeCustomStampId) return;
     setCustomStamps((prev) => prev.filter((stamp) => stamp.id !== activeCustomStampId));
     setActiveCustomStampId("");
+  }
+
+  function addWorker(): void {
+    const name = newWorkerName.trim();
+    if (!name) {
+      notify("Enter worker name.");
+      return;
+    }
+    const worker: Worker = {
+      id: makeId(),
+      name,
+      role: newWorkerRole.trim() || "Technician",
+    };
+    setWorkers((prev) => [worker, ...prev]);
+    setNewWorkerName("");
+    notify(`Added worker ${worker.name}.`);
+  }
+
+  function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): void {
+    const worker = workerById[workerId];
+    if (!worker) return;
+    setTimeEntries((prev) => [
+      {
+        id: makeId(),
+        workerId,
+        action,
+        at: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+    notify(`${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"}.`);
+  }
+
+  function addFolder(): void {
+    const name = newFolderName.trim();
+    if (!name) {
+      notify("Enter folder name.");
+      return;
+    }
+    const folder: FolderNode = {
+      id: makeId(),
+      name,
+      parentId: null,
+    };
+    setFolders((prev) => [folder, ...prev]);
+    setNewFolderName("");
+    if (!selectedFolderId) {
+      setSelectedFolderId(folder.id);
+    }
+  }
+
+  function addProjectFile(): void {
+    const name = newFileName.trim();
+    if (!name) {
+      notify("Enter file name.");
+      return;
+    }
+    const file: ProjectFile = {
+      id: makeId(),
+      folderId: selectedFolderId,
+      name,
+      updatedAt: new Date().toISOString(),
+      status: "Draft",
+    };
+    setProjectFiles((prev) => [file, ...prev]);
+    setNewFileName("");
+    notify(`Added file ${file.name}.`);
   }
 
   function applyPinStatus(status: PinStatus): void {
@@ -2084,10 +2216,166 @@ function App() {
     return null;
   }
 
+  function renderOperationsModule(): ReactElement {
+    return (
+      <main className="opsMain">
+        <section className="opsCard">
+          <h2>Workforce Clocking</h2>
+          <div className="opsInline">
+            <input
+              type="text"
+              placeholder="Worker name"
+              value={newWorkerName}
+              onChange={(event) => setNewWorkerName(event.target.value)}
+            />
+            <input
+              type="text"
+              placeholder="Role"
+              value={newWorkerRole}
+              onChange={(event) => setNewWorkerRole(event.target.value)}
+            />
+            <button type="button" onClick={addWorker}>
+              Add Worker
+            </button>
+          </div>
+          <div className="opsList">
+            {workers.length === 0 ? (
+              <p>No workers yet.</p>
+            ) : (
+              workers.map((worker) => (
+                <div key={worker.id} className="opsListRow">
+                  <div>
+                    <strong>{worker.name}</strong>
+                    <small>{worker.role}</small>
+                  </div>
+                  <div className="opsInline">
+                    <button type="button" onClick={() => addTimeEntry(worker.id, "clock_in")}>
+                      Clock In
+                    </button>
+                    <button type="button" onClick={() => addTimeEntry(worker.id, "clock_out")}>
+                      Clock Out
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="opsCard">
+          <h2>Filing Structure</h2>
+          <div className="opsInline">
+            <input
+              type="text"
+              placeholder="New folder"
+              value={newFolderName}
+              onChange={(event) => setNewFolderName(event.target.value)}
+            />
+            <button type="button" onClick={addFolder}>
+              Add Folder
+            </button>
+          </div>
+          <div className="opsFolderGrid">
+            <aside className="opsFolderList">
+              <button
+                type="button"
+                className={selectedFolderId === null ? "active" : ""}
+                onClick={() => setSelectedFolderId(null)}
+              >
+                Root
+              </button>
+              {folders.map((folder) => (
+                <button
+                  key={folder.id}
+                  type="button"
+                  className={selectedFolderId === folder.id ? "active" : ""}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                >
+                  {folder.name}
+                </button>
+              ))}
+            </aside>
+            <div>
+              <div className="opsInline">
+                <input
+                  type="text"
+                  placeholder="File name"
+                  value={newFileName}
+                  onChange={(event) => setNewFileName(event.target.value)}
+                />
+                <button type="button" onClick={addProjectFile}>
+                  Add File
+                </button>
+              </div>
+              <div className="opsList">
+                {visibleFiles.length === 0 ? (
+                  <p>No files in this folder.</p>
+                ) : (
+                  visibleFiles.map((file) => (
+                    <div key={file.id} className="opsListRow">
+                      <div>
+                        <strong>{file.name}</strong>
+                        <small>{new Date(file.updatedAt).toLocaleString()}</small>
+                      </div>
+                      <span>{file.status}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="opsCard">
+          <h2>Recent Time Entries</h2>
+          <div className="opsList">
+            {timeEntries.length === 0 ? (
+              <p>No clock events yet.</p>
+            ) : (
+              timeEntries.slice(0, 25).map((entry) => (
+                <div key={entry.id} className="opsListRow">
+                  <div>
+                    <strong>{workerById[entry.workerId]?.name ?? "Unknown worker"}</strong>
+                    <small>{new Date(entry.at).toLocaleString()}</small>
+                  </div>
+                  <span>{entry.action === "clock_in" ? "Clock In" : "Clock Out"}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const pages = Array.from({ length: pageCount }, (_, idx) => idx + 1);
 
   return (
     <div className="app">
+      <header className="appShellHeader">
+        <div>
+          <h1>MEP OPS Platform</h1>
+          <p>Operational workspace with markup studio</p>
+        </div>
+        <div className="opsInline">
+          <button
+            type="button"
+            className={activeModule === "markup-studio" ? "active" : ""}
+            onClick={() => setActiveModule("markup-studio")}
+          >
+            Markup Studio
+          </button>
+          <button
+            type="button"
+            className={activeModule === "operations" ? "active" : ""}
+            onClick={() => setActiveModule("operations")}
+          >
+            Operations
+          </button>
+        </div>
+      </header>
+      {activeModule === "markup-studio" ? (
+      <>
       <header className="toolbar">
         {actionNotice ? <div className="actionNotice">{actionNotice}</div> : null}
         {batchDocuments.length > 1 ? (
@@ -2684,6 +2972,10 @@ function App() {
           </div>
         )}
       </main>
+      </>
+      ) : (
+        renderOperationsModule()
+      )}
     </div>
   );
 }

@@ -27,6 +27,27 @@ body {
   flex-direction: column;
 }
 
+.appShellHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid #2f3745;
+  background: #0f1723;
+}
+
+.appShellHeader h1 {
+  margin: 0;
+  font-size: 1rem;
+  color: #f8fafc;
+}
+
+.appShellHeader p {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
 .toolbar {
   display: flex;
   flex-direction: column;
@@ -161,6 +182,73 @@ label {
 .viewer {
   padding: 0.8rem;
   background: #171b22;
+}
+
+.opsMain {
+  padding: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.9rem;
+  background: #171b22;
+}
+
+.opsCard {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #1b2432;
+  padding: 0.75rem;
+}
+
+.opsCard h2 {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+
+.opsInline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.opsList {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.opsListRow {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.opsListRow div {
+  display: flex;
+  flex-direction: column;
+}
+
+.opsListRow small {
+  font-size: 0.68rem;
+  color: #93a3b8;
+}
+
+.opsFolderGrid {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 0.65rem;
+}
+
+.opsFolderList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .workspaceLayout {

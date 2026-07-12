@@ -1,10 +1,14 @@
 # PDFMaker
 
 PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
+It now includes a broader MEP operations shell with clocking and filing modules.
 
 ## Features
 
 - PDF page rendering via `pdfjs-dist`
+- Module switcher:
+  - Markup Studio
+  - Operations (clock in/out + filing structure)
 - Overlay markup tools:
   - line
   - arrow
