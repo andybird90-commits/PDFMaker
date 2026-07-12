@@ -60,6 +60,7 @@ type TimeEntry = {
 };
 type FolderNode = { id: string; name: string; parentId: string | null };
 type ProjectFile = { id: string; folderId: string | null; name: string; updatedAt: string; status: string };
+type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
 type BatchDocument = {
   id: string;
   name: string;
@@ -90,12 +91,26 @@ const STAMP_PRESETS: Array<{ id: string; label: string; color: string }> = [
   { id: "status-b", label: "STATUS B", color: "#ca8a04" },
   { id: "status-c", label: "STATUS C", color: "#dc2626" },
 ];
+const FORM_TEMPLATES: FormTemplate[] = [
+  { id: "site-inspection", name: "Site Inspection", version: "v1.3", updatedAt: "09/07/2025" },
+  { id: "daily-report", name: "Daily Site Report", version: "v2.1", updatedAt: "08/06/2025" },
+  { id: "rams", name: "RAMS", version: "v1.0", updatedAt: "15/06/2025" },
+  { id: "materials-delivery", name: "Materials Delivery", version: "v1.2", updatedAt: "10/06/2025" },
+  { id: "handover-checklist", name: "Handover Checklist", version: "v1.1", updatedAt: "05/06/2025" },
+];
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatMinutes(totalMinutes: number): string {
+  const safeMinutes = Math.max(0, Math.round(totalMinutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
 function App() {
@@ -139,6 +154,12 @@ function App() {
   const [newFileName, setNewFileName] = useState<string>("");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [opsLoading, setOpsLoading] = useState<boolean>(false);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
+  const [opsProjectName, setOpsProjectName] = useState<string>("New Street Square");
+  const [opsLocationName, setOpsLocationName] = useState<string>("London EC4A 3BZ");
+  const [fileSearch, setFileSearch] = useState<string>("");
+  const [activeFormId, setActiveFormId] = useState<string | null>(null);
+  const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -202,10 +223,83 @@ function App() {
     () => Object.fromEntries(workers.map((worker) => [worker.id, worker])),
     [workers],
   );
+  const latestEntryByWorker = useMemo(() => {
+    const map: Record<string, TimeEntry> = {};
+    for (const entry of timeEntries) {
+      const current = map[entry.workerId];
+      if (!current || new Date(entry.at).getTime() > new Date(current.at).getTime()) {
+        map[entry.workerId] = entry;
+      }
+    }
+    return map;
+  }, [timeEntries]);
   const visibleFiles = useMemo(
-    () => projectFiles.filter((file) => file.folderId === selectedFolderId),
-    [projectFiles, selectedFolderId],
+    () =>
+      projectFiles.filter((file) => {
+        if (file.folderId !== selectedFolderId) return false;
+        if (!fileSearch.trim()) return true;
+        return file.name.toLowerCase().includes(fileSearch.trim().toLowerCase());
+      }),
+    [projectFiles, selectedFolderId, fileSearch],
   );
+  const timeSummary = useMemo(() => {
+    const sorted = [...timeEntries].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const openByWorker: Record<string, number | null> = {};
+    const workerMinutes: Record<string, number> = {};
+    const dayMinutes: Record<string, number> = {};
+    for (const entry of sorted) {
+      const timestamp = new Date(entry.at).getTime();
+      if (Number.isNaN(timestamp)) continue;
+      if (entry.action === "clock_in") {
+        openByWorker[entry.workerId] = timestamp;
+        continue;
+      }
+      const start = openByWorker[entry.workerId];
+      if (start == null) continue;
+      const minutes = Math.max(0, Math.round((timestamp - start) / 60000));
+      workerMinutes[entry.workerId] = (workerMinutes[entry.workerId] ?? 0) + minutes;
+      const dayKey = new Date(timestamp).toISOString().slice(0, 10);
+      dayMinutes[dayKey] = (dayMinutes[dayKey] ?? 0) + minutes;
+      openByWorker[entry.workerId] = null;
+    }
+    const workerBreakdown = Object.entries(workerMinutes)
+      .sort((a, b) => b[1] - a[1])
+      .map(([workerId, minutes]) => ({
+        workerId,
+        workerName: workerById[workerId]?.name ?? "Unknown worker",
+        minutes,
+      }));
+    const recentDayBreakdown = Object.entries(dayMinutes)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 6)
+      .map(([day, minutes]) => ({ day, minutes }));
+    return {
+      totalMinutes: Object.values(workerMinutes).reduce((sum, minutes) => sum + minutes, 0),
+      workerBreakdown,
+      recentDayBreakdown,
+    };
+  }, [timeEntries, workerById]);
+  const projectStats = useMemo(() => {
+    const openPins = annotations.filter((annotation) => annotation.type === "pin" && annotation.status !== "closed").length;
+    return {
+      totalFiles: projectFiles.length,
+      totalForms: FORM_TEMPLATES.length,
+      totalWorkers: workers.length,
+      totalHoursMinutes: timeSummary.totalMinutes,
+      openPins,
+    };
+  }, [annotations, projectFiles.length, workers.length, timeSummary.totalMinutes]);
+
+  useEffect(() => {
+    if (workers.length === 0) {
+      setSelectedWorkerId("");
+      return;
+    }
+    const stillExists = workers.some((worker) => worker.id === selectedWorkerId);
+    if (!stillExists) {
+      setSelectedWorkerId(workers[0].id);
+    }
+  }, [workers, selectedWorkerId]);
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -2385,136 +2479,298 @@ function App() {
   }
 
   function renderOperationsModule(): ReactElement {
+    const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId) ?? null;
+    const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
+    const selectedWorkerIsClockedIn = selectedWorkerLastAction?.action === "clock_in";
+    const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
+    const completedForms = FORM_TEMPLATES.filter((form) => completedFormIds.includes(form.id));
+    const activeForm = FORM_TEMPLATES.find((form) => form.id === activeFormId) ?? null;
+
     return (
-      <main className="opsMain">
-        <section className="opsCard">
-          <h2>Workforce Clocking</h2>
+      <main className="opsMain opsExperience">
+        <section className="opsHero">
+          <div>
+            <h2>Field Operations</h2>
+            <p>GPS sign in, timesheets, forms, project files and dashboard reporting.</p>
+          </div>
           <p className="opsBackendTag">
             Backend: {hasSupabaseConfig ? "Supabase" : "Local Storage"}
             {opsLoading ? " (syncing...)" : ""}
           </p>
-          <div className="opsInline">
-            <input
-              type="text"
-              placeholder="Worker name"
-              value={newWorkerName}
-              onChange={(event) => setNewWorkerName(event.target.value)}
-            />
-            <input
-              type="text"
-              placeholder="Role"
-              value={newWorkerRole}
-              onChange={(event) => setNewWorkerRole(event.target.value)}
-            />
-            <button type="button" onClick={() => void addWorker()} disabled={opsLoading}>
-              Add Worker
-            </button>
-          </div>
-          <div className="opsList">
-            {workers.length === 0 ? (
-              <p>No workers yet.</p>
-            ) : (
-              workers.map((worker) => (
-                <div key={worker.id} className="opsListRow">
-                  <div>
-                    <strong>{worker.name}</strong>
-                    <small>{worker.role}</small>
-                  </div>
-                  <div className="opsInline">
-                    <button type="button" onClick={() => void addTimeEntry(worker.id, "clock_in")} disabled={opsLoading}>
-                      Clock In
-                    </button>
-                    <button type="button" onClick={() => void addTimeEntry(worker.id, "clock_out")} disabled={opsLoading}>
-                      Clock Out
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </section>
 
-        <section className="opsCard">
-          <h2>Filing Structure</h2>
-          <div className="opsInline">
-            <input
-              type="text"
-              placeholder="New folder"
-              value={newFolderName}
-              onChange={(event) => setNewFolderName(event.target.value)}
-            />
-            <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
-              Add Folder
-            </button>
-          </div>
-          <div className="opsFolderGrid">
-            <aside className="opsFolderList">
-              <button
-                type="button"
-                className={selectedFolderId === null ? "active" : ""}
-                onClick={() => setSelectedFolderId(null)}
-              >
-                Root
-              </button>
-              {folders.map((folder) => (
-                <button
-                  key={folder.id}
-                  type="button"
-                  className={selectedFolderId === folder.id ? "active" : ""}
-                  onClick={() => setSelectedFolderId(folder.id)}
+        <section className="opsPhoneGrid">
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>1. GPS Sign In / Out</h3>
+            </header>
+            <div className="opsFormStack">
+              <label>
+                Project
+                <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+              </label>
+              <label>
+                Location
+                <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+              </label>
+              <label>
+                Worker
+                <select
+                  value={selectedWorkerId}
+                  onChange={(event) => setSelectedWorkerId(event.target.value)}
+                  disabled={workers.length === 0}
                 >
-                  {folder.name}
-                </button>
-              ))}
-            </aside>
-            <div>
+                  {workers.length === 0 ? <option value="">No workers yet</option> : null}
+                  {workers.map((worker) => (
+                    <option key={worker.id} value={worker.id}>
+                      {worker.name} ({worker.role})
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="opsInline">
                 <input
                   type="text"
-                  placeholder="File name"
-                  value={newFileName}
-                  onChange={(event) => setNewFileName(event.target.value)}
+                  placeholder="New worker name"
+                  value={newWorkerName}
+                  onChange={(event) => setNewWorkerName(event.target.value)}
                 />
-                <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
-                  Add File
+                <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
+                <button type="button" onClick={() => void addWorker()} disabled={opsLoading}>
+                  Add Worker
                 </button>
               </div>
-              <div className="opsList">
-                {visibleFiles.length === 0 ? (
-                  <p>No files in this folder.</p>
-                ) : (
-                  visibleFiles.map((file) => (
-                    <div key={file.id} className="opsListRow">
-                      <div>
-                        <strong>{file.name}</strong>
-                        <small>{new Date(file.updatedAt).toLocaleString()}</small>
-                      </div>
-                      <span>{file.status}</span>
-                    </div>
-                  ))
-                )}
+              <div className="opsKpiRow">
+                <div className="opsKpi">
+                  <strong>{selectedWorker?.name ?? "No worker selected"}</strong>
+                  <small>Status: {selectedWorkerIsClockedIn ? "Signed In" : "Signed Out"}</small>
+                </div>
+                <div className="opsInline">
+                  <button
+                    type="button"
+                    onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_in")}
+                    disabled={!selectedWorker || opsLoading}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectedWorker && void addTimeEntry(selectedWorker.id, "clock_out")}
+                    disabled={!selectedWorker || opsLoading}
+                  >
+                    Sign Out
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </article>
 
-        <section className="opsCard">
-          <h2>Recent Time Entries</h2>
-          <div className="opsList">
-            {timeEntries.length === 0 ? (
-              <p>No clock events yet.</p>
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>2. Timesheet Generation</h3>
+            </header>
+            <div className="opsKpiLarge">{formatMinutes(timeSummary.totalMinutes)}</div>
+            <small className="opsSubtle">Total logged hours</small>
+            <div className="opsList">
+              {timeSummary.workerBreakdown.length === 0 ? (
+                <p>No completed shifts yet.</p>
+              ) : (
+                timeSummary.workerBreakdown.map((row) => (
+                  <div key={row.workerId} className="opsListRow">
+                    <div>
+                      <strong>{row.workerName}</strong>
+                      <small>Timesheet total</small>
+                    </div>
+                    <span>{formatMinutes(row.minutes)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="opsList">
+              {timeSummary.recentDayBreakdown.map((row) => (
+                <div key={row.day} className="opsListRow">
+                  <small>{new Date(`${row.day}T00:00:00`).toLocaleDateString()}</small>
+                  <span>{formatMinutes(row.minutes)}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>3. Project Files</h3>
+            </header>
+            <div className="opsInline">
+              <input
+                type="text"
+                placeholder="New folder"
+                value={newFolderName}
+                onChange={(event) => setNewFolderName(event.target.value)}
+              />
+              <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
+                Add Folder
+              </button>
+            </div>
+            <div className="opsFolderGrid">
+              <aside className="opsFolderList">
+                <button
+                  type="button"
+                  className={selectedFolderId === null ? "active" : ""}
+                  onClick={() => setSelectedFolderId(null)}
+                >
+                  Root
+                </button>
+                {folders.map((folder) => (
+                  <button
+                    key={folder.id}
+                    type="button"
+                    className={selectedFolderId === folder.id ? "active" : ""}
+                    onClick={() => setSelectedFolderId(folder.id)}
+                  >
+                    {folder.name}
+                  </button>
+                ))}
+              </aside>
+              <div>
+                <input
+                  type="text"
+                  placeholder="Search files..."
+                  value={fileSearch}
+                  onChange={(event) => setFileSearch(event.target.value)}
+                />
+                <div className="opsInline">
+                  <input
+                    type="text"
+                    placeholder="File name"
+                    value={newFileName}
+                    onChange={(event) => setNewFileName(event.target.value)}
+                  />
+                  <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
+                    Add File
+                  </button>
+                </div>
+                <div className="opsList">
+                  {visibleFiles.length === 0 ? (
+                    <p>No files in this folder.</p>
+                  ) : (
+                    visibleFiles.map((file) => (
+                      <div key={file.id} className="opsListRow">
+                        <div>
+                          <strong>{file.name}</strong>
+                          <small>{new Date(file.updatedAt).toLocaleString()}</small>
+                        </div>
+                        <span>{file.status}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>4. Forms Library</h3>
+            </header>
+            <div className="opsList">
+              {availableForms.map((form) => (
+                <button key={form.id} type="button" className="opsListRow opsRowButton" onClick={() => setActiveFormId(form.id)}>
+                  <div>
+                    <strong>{form.name}</strong>
+                    <small>
+                      {form.version} • Updated {form.updatedAt}
+                    </small>
+                  </div>
+                  <span>Open</span>
+                </button>
+              ))}
+            </div>
+            {availableForms.length === 0 ? <p>All forms completed.</p> : null}
+          </article>
+
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>5. Form In Use / Export</h3>
+            </header>
+            {activeForm ? (
+              <>
+                <div className="opsKpi">
+                  <strong>{activeForm.name}</strong>
+                  <small>{activeForm.version}</small>
+                </div>
+                <div className="opsInline">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!activeForm) return;
+                      setCompletedFormIds((prev) => (prev.includes(activeForm.id) ? prev : [...prev, activeForm.id]));
+                      notify(`${activeForm.name} completed.`);
+                    }}
+                  >
+                    Mark Completed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!activeForm) return;
+                      notify(`Exported ${activeForm.name} as PDF.`);
+                    }}
+                  >
+                    Export PDF
+                  </button>
+                </div>
+              </>
             ) : (
-              timeEntries.slice(0, 25).map((entry) => (
+              <p>Select a form from Forms Library.</p>
+            )}
+            <div className="opsList">
+              {completedForms.map((form) => (
+                <div key={form.id} className="opsListRow">
+                  <div>
+                    <strong>{form.name}</strong>
+                    <small>{form.version}</small>
+                  </div>
+                  <span>Completed</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="opsPhoneCard">
+            <header className="opsPhoneHeader">
+              <h3>6. Project Dashboard</h3>
+            </header>
+            <div className="opsDashboardGrid">
+              <div className="opsKpi">
+                <strong>{projectStats.totalFiles}</strong>
+                <small>Files</small>
+              </div>
+              <div className="opsKpi">
+                <strong>{projectStats.totalForms}</strong>
+                <small>Forms</small>
+              </div>
+              <div className="opsKpi">
+                <strong>{projectStats.totalWorkers}</strong>
+                <small>Team</small>
+              </div>
+              <div className="opsKpi">
+                <strong>{formatMinutes(projectStats.totalHoursMinutes)}</strong>
+                <small>Hours</small>
+              </div>
+            </div>
+            <div className="opsList">
+              {timeEntries.slice(0, 5).map((entry) => (
                 <div key={entry.id} className="opsListRow">
                   <div>
                     <strong>{workerById[entry.workerId]?.name ?? "Unknown worker"}</strong>
                     <small>{new Date(entry.at).toLocaleString()}</small>
                   </div>
-                  <span>{entry.action === "clock_in" ? "Clock In" : "Clock Out"}</span>
+                  <span>{entry.action === "clock_in" ? "Sign In" : "Sign Out"}</span>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+            <small className="opsSubtle">Open pins needing attention: {projectStats.openPins}</small>
+          </article>
         </section>
       </main>
     );

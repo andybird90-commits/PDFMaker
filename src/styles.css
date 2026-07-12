@@ -187,27 +187,119 @@ label {
 .opsMain {
   padding: 1rem;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 0.9rem;
+  gap: 1rem;
   background: #171b22;
 }
 
-.opsCard {
-  border: 1px solid #334155;
-  border-radius: 12px;
-  background: #1b2432;
-  padding: 0.75rem;
+.opsExperience {
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 35%),
+    radial-gradient(circle at bottom right, rgba(234, 88, 12, 0.12), transparent 40%),
+    #0b1321;
 }
 
-.opsCard h2 {
-  margin: 0 0 0.6rem;
-  font-size: 0.95rem;
+.opsHero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border: 1px solid #243247;
+  border-radius: 16px;
+  padding: 1rem;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.95), rgba(10, 34, 57, 0.92));
+}
+
+.opsHero h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.opsHero p {
+  margin: 0.25rem 0 0;
+  color: #9fb2cd;
+}
+
+.opsPhoneGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 0.9rem;
+}
+
+.opsPhoneCard {
+  border: 1px solid #223147;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #0e1b2d 0%, #0c1624 100%);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 260px;
+}
+
+.opsPhoneHeader h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #f1f5f9;
 }
 
 .opsBackendTag {
-  margin: 0 0 0.55rem;
+  margin: 0;
   font-size: 0.72rem;
-  color: #93c5fd;
+  color: #7dd3fc;
+}
+
+.opsFormStack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.opsPhoneCard input[type="text"],
+.opsPhoneCard select {
+  width: 100%;
+}
+
+.opsPhoneCard .opsInline input[type="text"] {
+  flex: 1 1 130px;
+}
+
+.opsKpiRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.opsKpi {
+  border: 1px solid #223246;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.75);
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.opsKpi strong {
+  font-size: 0.9rem;
+  color: #f8fafc;
+}
+
+.opsKpi small {
+  color: #93a3b8;
+}
+
+.opsKpiLarge {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.opsSubtle {
+  color: #8ea4c0;
+  font-size: 0.72rem;
 }
 
 .opsInline {
@@ -218,20 +310,21 @@ label {
 }
 
 .opsList {
-  margin-top: 0.6rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
 .opsListRow {
-  border: 1px solid #334155;
+  border: 1px solid #223349;
   border-radius: 8px;
-  padding: 0.45rem 0.55rem;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0.48rem 0.58rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
+  text-align: left;
 }
 
 .opsListRow div {
@@ -244,10 +337,13 @@ label {
   color: #93a3b8;
 }
 
+.opsRowButton {
+  width: 100%;
+}
+
 .opsFolderGrid {
-  margin-top: 0.6rem;
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 130px 1fr;
   gap: 0.65rem;
 }
 
@@ -255,6 +351,19 @@ label {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.opsDashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+@media (max-width: 760px) {
+  .opsHero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .workspaceLayout {
