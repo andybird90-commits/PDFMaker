@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { PDFDocument, rgb } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   buildCloudPath,
+  clamp01,
   denormalizePoint,
   downloadBlob,
+  lineStyleToDash,
   normalizePoint,
   polylineToPath,
   rectFromPoints,
 } from "./annotationUtils";
-import type { Annotation, MarkupDocument, Point, StampAnnotation, Tool } from "./types";
+import type { Annotation, LineStyle, MarkupDocument, Point, StampAnnotation, Tool } from "./types";
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 
@@ -22,10 +25,22 @@ type DrawingState =
     }
   | null;
 
+type InteractionState =
+  | {
+      page: number;
+      annotationId: string;
+      mode: "move" | "resize";
+      handle?: string;
+      startPoint: Point;
+      initialAnnotation: Annotation;
+    }
+  | null;
+
 type PageSize = { width: number; height: number };
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
+const DEFAULT_HIGHLIGHTER_COLOR = "#ffe45e";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -36,15 +51,21 @@ function makeId(): string {
 
 function App() {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfName, setPdfName] = useState<string>("document.pdf");
   const [pageCount, setPageCount] = useState<number>(0);
   const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({});
+  const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
   const [scale, setScale] = useState<number>(1.25);
   const [tool, setTool] = useState<Tool>("select");
   const [strokeColor, setStrokeColor] = useState<string>("#ff2d55");
+  const [highlighterColor, setHighlighterColor] = useState<string>(DEFAULT_HIGHLIGHTER_COLOR);
   const [strokeWidth, setStrokeWidth] = useState<number>(DEFAULT_STROKE_WIDTH);
+  const [highlighterWidth, setHighlighterWidth] = useState<number>(DEFAULT_HIGHLIGHTER_WIDTH);
+  const [lineStyle, setLineStyle] = useState<LineStyle>("solid");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [drawingState, setDrawingState] = useState<DrawingState>(null);
+  const [interaction, setInteraction] = useState<InteractionState>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stampLabel, setStampLabel] = useState<string>("APPROVED");
   const [stampImageDataUrl, setStampImageDataUrl] = useState<string | null>(null);
@@ -52,10 +73,15 @@ function App() {
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
+  const pageRefs = useRef<Record<number, HTMLElement | null>>({});
 
   const sortedAnnotations = useMemo(
     () => [...annotations].sort((a, b) => a.page - b.page),
     [annotations],
+  );
+  const selectedAnnotation = useMemo(
+    () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
+    [annotations, selectedId],
   );
 
   useEffect(() => {
@@ -100,12 +126,46 @@ function App() {
     };
   }, [pdfDoc, pageCount, scale]);
 
+  useEffect(() => {
+    if (!pdfDoc || pageCount === 0) {
+      setThumbnails({});
+      return;
+    }
+
+    let cancelled = false;
+    const currentDoc = pdfDoc;
+
+    async function renderThumbnails(): Promise<void> {
+      const next: Record<number, string> = {};
+      for (let pageNum = 1; pageNum <= pageCount; pageNum += 1) {
+        const page = await currentDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 0.22 });
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        next[pageNum] = canvas.toDataURL("image/png");
+      }
+      if (!cancelled) {
+        setThumbnails(next);
+      }
+    }
+
+    void renderThumbnails();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDoc, pageCount]);
+
   async function handleFileUpload(file: File | null): Promise<void> {
     if (!file) return;
     const data = new Uint8Array(await file.arrayBuffer());
     const loadingTask = getDocument({ data });
     const doc = await loadingTask.promise;
     setPdfDoc(doc);
+    setPdfBytes(data);
     setPdfName(file.name);
     setPageCount(doc.numPages);
     setAnnotations([]);
@@ -127,8 +187,103 @@ function App() {
     setAnnotations((prev) => [...prev, annotation]);
   }
 
+  function beginInteraction(
+    event: React.PointerEvent<SVGElement>,
+    annotation: Annotation,
+    page: number,
+    mode: "move" | "resize",
+    handle?: string,
+  ): void {
+    if (tool !== "select") return;
+    event.stopPropagation();
+    const svg = svgRefs.current[page];
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    setSelectedId(annotation.id);
+    setInteraction({
+      page,
+      annotationId: annotation.id,
+      mode,
+      handle,
+      startPoint: { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      initialAnnotation: annotation,
+    });
+  }
+
+  function movePoint(point: Point, dx: number, dy: number): Point {
+    return {
+      x: clamp01(point.x + dx),
+      y: clamp01(point.y + dy),
+    };
+  }
+
+  function updateSelectedAnnotation(updater: (annotation: Annotation) => Annotation): void {
+    if (!selectedId) return;
+    setAnnotations((prev) =>
+      prev.map((annotation) => (annotation.id === selectedId ? updater(annotation) : annotation)),
+    );
+  }
+
+  function resizeAnnotation(annotation: Annotation, pointer: Point, handle: string): Annotation {
+    if (annotation.type === "line" || annotation.type === "arrow") {
+      if (handle === "start") return { ...annotation, start: pointer };
+      if (handle === "end") return { ...annotation, end: pointer };
+      return annotation;
+    }
+
+    if (annotation.type === "rect" || annotation.type === "cloud") {
+      const start = annotation.start;
+      const end = annotation.end;
+      if (handle === "nw") return { ...annotation, start: pointer, end };
+      if (handle === "ne") return { ...annotation, start: { x: start.x, y: pointer.y }, end: { x: pointer.x, y: end.y } };
+      if (handle === "sw") return { ...annotation, start: { x: pointer.x, y: start.y }, end: { x: end.x, y: pointer.y } };
+      if (handle === "se") return { ...annotation, start, end: pointer };
+      return annotation;
+    }
+
+    if (annotation.type === "stamp") {
+      const center = annotation.position;
+      const left = center.x - annotation.width / 2;
+      const top = center.y - annotation.height / 2;
+      const right = center.x + annotation.width / 2;
+      const bottom = center.y + annotation.height / 2;
+      const next = { left, top, right, bottom };
+      if (handle === "nw") {
+        next.left = pointer.x;
+        next.top = pointer.y;
+      } else if (handle === "ne") {
+        next.right = pointer.x;
+        next.top = pointer.y;
+      } else if (handle === "sw") {
+        next.left = pointer.x;
+        next.bottom = pointer.y;
+      } else if (handle === "se") {
+        next.right = pointer.x;
+        next.bottom = pointer.y;
+      } else {
+        return annotation;
+      }
+      const width = Math.max(0.05, Math.abs(next.right - next.left));
+      const height = Math.max(0.03, Math.abs(next.bottom - next.top));
+      return {
+        ...annotation,
+        position: {
+          x: clamp01((next.left + next.right) / 2),
+          y: clamp01((next.top + next.bottom) / 2),
+        },
+        width,
+        height,
+      };
+    }
+
+    return annotation;
+  }
+
   function onPointerDown(page: number, event: React.PointerEvent<SVGSVGElement>): void {
-    if (tool === "select") return;
+    if (tool === "select") {
+      setSelectedId(null);
+      return;
+    }
     const point = getEventPoint(event, page);
     const size = pageSizes[page];
     if (!point || !size) return;
@@ -141,6 +296,7 @@ function App() {
         page,
         color: strokeColor,
         strokeWidth,
+        lineStyle,
         position: normalized,
         width: 0.2,
         height: 0.08,
@@ -171,20 +327,6 @@ function App() {
     setDrawingState({ page, start: point, current: point, points: [] });
   }
 
-  function onPointerMove(page: number, event: React.PointerEvent<SVGSVGElement>): void {
-    if (!drawingState || drawingState.page !== page) return;
-    const point = getEventPoint(event, page);
-    if (!point) return;
-
-    setDrawingState((prev) => {
-      if (!prev || prev.page !== page) return prev;
-      if (tool === "highlighter") {
-        return { ...prev, current: point, points: [...prev.points, point] };
-      }
-      return { ...prev, current: point };
-    });
-  }
-
   function onPointerUp(page: number): void {
     if (!drawingState || drawingState.page !== page) return;
 
@@ -198,6 +340,7 @@ function App() {
       page,
       color: strokeColor,
       strokeWidth,
+      lineStyle,
     };
 
     if (tool === "line" || tool === "arrow") {
@@ -226,12 +369,14 @@ function App() {
       addAnnotation({
         ...shared,
         type: "highlighter",
-        strokeWidth: DEFAULT_HIGHLIGHTER_WIDTH,
+        color: highlighterColor,
+        strokeWidth: highlighterWidth,
         opacity: 0.35,
         points: drawingState.points.map((p) => normalizePoint(p, size.width, size.height)),
       });
     }
     setDrawingState(null);
+    setInteraction(null);
   }
 
   function removeSelected(): void {
@@ -267,7 +412,12 @@ function App() {
     if (!Array.isArray(parsed.annotations)) {
       throw new Error("Invalid annotation payload");
     }
-    setAnnotations(parsed.annotations);
+    setAnnotations(
+      parsed.annotations.map((annotation) => ({
+        ...annotation,
+        lineStyle: annotation.lineStyle ?? "solid",
+      })),
+    );
     setSelectedId(null);
   }
 
@@ -305,11 +455,281 @@ function App() {
     }
   }
 
+  function hexToRgb(hexColor: string): { r: number; g: number; b: number } {
+    const sanitized = hexColor.replace("#", "");
+    const value = sanitized.length === 3
+      ? sanitized
+          .split("")
+          .map((c) => `${c}${c}`)
+          .join("")
+      : sanitized;
+    const int = Number.parseInt(value, 16);
+    return {
+      r: (int >> 16) & 255,
+      g: (int >> 8) & 255,
+      b: int & 255,
+    };
+  }
+
+  function toPdfColor(hexColor: string) {
+    const { r, g, b } = hexToRgb(hexColor);
+    return rgb(r / 255, g / 255, b / 255);
+  }
+
+  function getDashArray(style: LineStyle, width: number): number[] | undefined {
+    if (style === "dashed") return [width * 4, width * 2];
+    if (style === "dotted") return [width, width * 1.5];
+    return undefined;
+  }
+
+  function toPdfPoint(point: Point, pageWidth: number, pageHeight: number): Point {
+    return {
+      x: point.x * pageWidth,
+      y: (1 - point.y) * pageHeight,
+    };
+  }
+
+  function dataUrlToBytes(dataUrl: string): Uint8Array {
+    const base64 = dataUrl.split(",")[1] ?? "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  async function exportFlattenedPdf(): Promise<void> {
+    if (!pdfBytes) return;
+    const output = await PDFDocument.load(pdfBytes);
+    const pages = output.getPages();
+    const imageCache = new Map<string, Awaited<ReturnType<typeof output.embedPng>>>();
+
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+      const page = pages[pageIndex];
+      const pageNo = pageIndex + 1;
+      const { width, height } = page.getSize();
+      const pageAnnotations = annotations.filter((annotation) => annotation.page === pageNo);
+
+      for (const annotation of pageAnnotations) {
+        const color = toPdfColor(annotation.color);
+        const dashArray = getDashArray(annotation.lineStyle ?? "solid", annotation.strokeWidth);
+        if (annotation.type === "line" || annotation.type === "arrow") {
+          const start = toPdfPoint(annotation.start, width, height);
+          const end = toPdfPoint(annotation.end, width, height);
+          page.drawLine({
+            start,
+            end,
+            color,
+            thickness: annotation.strokeWidth,
+            dashArray,
+          });
+          if (annotation.type === "arrow") {
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const angle = Math.atan2(dy, dx);
+            const arm = Math.max(8, annotation.strokeWidth * 4);
+            page.drawLine({
+              start: end,
+              end: {
+                x: end.x - arm * Math.cos(angle - Math.PI / 7),
+                y: end.y - arm * Math.sin(angle - Math.PI / 7),
+              },
+              color,
+              thickness: annotation.strokeWidth,
+            });
+            page.drawLine({
+              start: end,
+              end: {
+                x: end.x - arm * Math.cos(angle + Math.PI / 7),
+                y: end.y - arm * Math.sin(angle + Math.PI / 7),
+              },
+              color,
+              thickness: annotation.strokeWidth,
+            });
+          }
+          continue;
+        }
+
+        if (annotation.type === "rect" || annotation.type === "cloud") {
+          const start = toPdfPoint(annotation.start, width, height);
+          const end = toPdfPoint(annotation.end, width, height);
+          const x = Math.min(start.x, end.x);
+          const y = Math.min(start.y, end.y);
+          const w = Math.max(1, Math.abs(end.x - start.x));
+          const h = Math.max(1, Math.abs(end.y - start.y));
+          if (annotation.type === "rect") {
+            page.drawRectangle({
+              x,
+              y,
+              width: w,
+              height: h,
+              borderColor: color,
+              borderWidth: annotation.strokeWidth,
+              opacity: 0,
+              borderDashArray: dashArray,
+            });
+          } else {
+            const path = buildCloudPath(0, 0, w, h, Math.max(6, annotation.strokeWidth * 2));
+            page.drawSvgPath(path, {
+              x,
+              y,
+              borderColor: color,
+              borderWidth: annotation.strokeWidth,
+              color: rgb(1, 1, 1),
+              opacity: 0,
+            });
+          }
+          continue;
+        }
+
+        if (annotation.type === "highlighter") {
+          const points = annotation.points.map((point) => toPdfPoint(point, width, height));
+          for (let i = 0; i < points.length - 1; i += 1) {
+            page.drawLine({
+              start: points[i],
+              end: points[i + 1],
+              color,
+              thickness: annotation.strokeWidth,
+              opacity: annotation.opacity,
+              dashArray,
+            });
+          }
+          continue;
+        }
+
+        if (annotation.type === "stamp") {
+          const center = toPdfPoint(annotation.position, width, height);
+          const stampWidth = annotation.width * width;
+          const stampHeight = annotation.height * height;
+          const x = center.x - stampWidth / 2;
+          const y = center.y - stampHeight / 2;
+          if (annotation.stampKind === "image" && annotation.imageDataUrl) {
+            const cached = imageCache.get(annotation.imageDataUrl);
+            const embedded = cached
+              ?? (annotation.imageDataUrl.includes("image/png")
+                ? await output.embedPng(dataUrlToBytes(annotation.imageDataUrl))
+                : await output.embedJpg(dataUrlToBytes(annotation.imageDataUrl)));
+            imageCache.set(annotation.imageDataUrl, embedded);
+            page.drawImage(embedded, {
+              x,
+              y,
+              width: stampWidth,
+              height: stampHeight,
+              opacity: annotation.opacity,
+            });
+          } else {
+            page.drawRectangle({
+              x,
+              y,
+              width: stampWidth,
+              height: stampHeight,
+              borderColor: color,
+              borderWidth: annotation.strokeWidth,
+              color: rgb(1, 1, 1),
+              opacity: 0.65 * annotation.opacity,
+            });
+            page.drawText(annotation.label ?? "STAMP", {
+              x: x + 6,
+              y: y + stampHeight / 2 - 4,
+              size: Math.max(9, stampHeight * 0.28),
+              color,
+              opacity: annotation.opacity,
+            });
+          }
+        }
+      }
+    }
+
+    const flattenedBytes = await output.save();
+    const normalizedBytes = new Uint8Array(flattenedBytes);
+    downloadBlob(
+      new Blob([normalizedBytes.buffer], { type: "application/pdf" }),
+      `${pdfName.replace(/\.pdf$/i, "")}-flattened.pdf`,
+    );
+  }
+
+  function onPointerMove(page: number, event: React.PointerEvent<SVGSVGElement>): void {
+    const size = pageSizes[page];
+    if (!size) return;
+    const point = getEventPoint(event, page);
+    if (!point) return;
+
+    if (interaction && interaction.page === page) {
+      const startNorm = normalizePoint(interaction.startPoint, size.width, size.height);
+      const currentNorm = normalizePoint(point, size.width, size.height);
+      const dx = currentNorm.x - startNorm.x;
+      const dy = currentNorm.y - startNorm.y;
+
+      setAnnotations((prev) =>
+        prev.map((annotation) => {
+          if (annotation.id !== interaction.annotationId) return annotation;
+          const initial = interaction.initialAnnotation;
+          if (interaction.mode === "move") {
+            if (annotation.type === "line" || annotation.type === "arrow") {
+              if (initial.type !== "line" && initial.type !== "arrow") return annotation;
+              return {
+                ...annotation,
+                start: movePoint(initial.start, dx, dy),
+                end: movePoint(initial.end, dx, dy),
+              };
+            }
+            if (annotation.type === "rect" || annotation.type === "cloud") {
+              if (initial.type !== "rect" && initial.type !== "cloud") return annotation;
+              return {
+                ...annotation,
+                start: movePoint(initial.start, dx, dy),
+                end: movePoint(initial.end, dx, dy),
+              };
+            }
+            if (annotation.type === "highlighter") {
+              if (initial.type !== "highlighter") return annotation;
+              return {
+                ...annotation,
+                points: initial.points.map((p) => movePoint(p, dx, dy)),
+              };
+            }
+            if (annotation.type === "stamp") {
+              if (initial.type !== "stamp") return annotation;
+              return {
+                ...annotation,
+                position: movePoint(initial.position, dx, dy),
+              };
+            }
+          }
+          if (interaction.mode === "resize" && interaction.handle) {
+            return resizeAnnotation(annotation, currentNorm, interaction.handle);
+          }
+          return annotation;
+        }),
+      );
+      return;
+    }
+
+    if (!drawingState || drawingState.page !== page) return;
+    setDrawingState((prev) => {
+      if (!prev || prev.page !== page) return prev;
+      if (tool === "highlighter") {
+        return { ...prev, current: point, points: [...prev.points, point] };
+      }
+      return { ...prev, current: point };
+    });
+  }
+
+  function onOverlayPointerUp(page: number): void {
+    if (interaction && interaction.page === page) {
+      setInteraction(null);
+      return;
+    }
+    onPointerUp(page);
+  }
+
   function renderAnnotation(annotation: Annotation, page: number): ReactElement | null {
     const size = pageSizes[page];
     if (!size) return null;
 
     const selected = selectedId === annotation.id;
+    const dash = lineStyleToDash(annotation.lineStyle ?? "solid", annotation.strokeWidth);
     const commonProps = {
       onClick: (event: React.MouseEvent<SVGElement>) => {
         event.stopPropagation();
@@ -317,8 +737,12 @@ function App() {
           setSelectedId(annotation.id);
         }
       },
+      onPointerDown: (event: React.PointerEvent<SVGElement>) => {
+        beginInteraction(event, annotation, page, "move");
+      },
       style: { cursor: tool === "select" ? "pointer" : "crosshair" },
       stroke: annotation.color,
+      strokeDasharray: dash,
       strokeWidth: selected ? annotation.strokeWidth + 1.25 : annotation.strokeWidth,
       "data-annotation-id": annotation.id,
     };
@@ -373,6 +797,7 @@ function App() {
           d={d}
           fill="none"
           stroke={annotation.color}
+          strokeDasharray={dash}
           strokeWidth={annotation.strokeWidth}
           opacity={annotation.opacity}
           strokeLinecap="round"
@@ -414,6 +839,7 @@ function App() {
             height={height}
             fill="rgba(255,255,255,0.7)"
             stroke={annotation.color}
+            strokeDasharray={dash}
             strokeWidth={selected ? annotation.strokeWidth + 1 : annotation.strokeWidth}
             rx={4}
             ry={4}
@@ -436,6 +862,61 @@ function App() {
     return null;
   }
 
+  function renderSelectionHandles(annotation: Annotation, page: number): ReactElement | null {
+    if (tool !== "select" || selectedId !== annotation.id) return null;
+    const size = pageSizes[page];
+    if (!size) return null;
+
+    const handles: Array<{ key: string; point: Point }> = [];
+    if (annotation.type === "line" || annotation.type === "arrow") {
+      handles.push({
+        key: "start",
+        point: denormalizePoint(annotation.start, size.width, size.height),
+      });
+      handles.push({
+        key: "end",
+        point: denormalizePoint(annotation.end, size.width, size.height),
+      });
+    } else if (annotation.type === "rect" || annotation.type === "cloud") {
+      const start = denormalizePoint(annotation.start, size.width, size.height);
+      const end = denormalizePoint(annotation.end, size.width, size.height);
+      const rect = rectFromPoints(start, end);
+      handles.push({ key: "nw", point: { x: rect.x, y: rect.y } });
+      handles.push({ key: "ne", point: { x: rect.x + rect.w, y: rect.y } });
+      handles.push({ key: "sw", point: { x: rect.x, y: rect.y + rect.h } });
+      handles.push({ key: "se", point: { x: rect.x + rect.w, y: rect.y + rect.h } });
+    } else if (annotation.type === "stamp") {
+      const center = denormalizePoint(annotation.position, size.width, size.height);
+      const halfW = (annotation.width * size.width) / 2;
+      const halfH = (annotation.height * size.height) / 2;
+      handles.push({ key: "nw", point: { x: center.x - halfW, y: center.y - halfH } });
+      handles.push({ key: "ne", point: { x: center.x + halfW, y: center.y - halfH } });
+      handles.push({ key: "sw", point: { x: center.x - halfW, y: center.y + halfH } });
+      handles.push({ key: "se", point: { x: center.x + halfW, y: center.y + halfH } });
+    } else {
+      return null;
+    }
+
+    return (
+      <g>
+        {handles.map((handle) => (
+          <rect
+            key={`${annotation.id}-${handle.key}`}
+            x={handle.point.x - 4}
+            y={handle.point.y - 4}
+            width={8}
+            height={8}
+            fill="#ffffff"
+            stroke="#111827"
+            strokeWidth={1}
+            style={{ cursor: "nwse-resize" }}
+            onPointerDown={(event) => beginInteraction(event, annotation, page, "resize", handle.key)}
+          />
+        ))}
+      </g>
+    );
+  }
+
   function renderActiveShape(page: number): ReactElement | null {
     if (!drawingState || drawingState.page !== page) return null;
     const start = drawingState.start;
@@ -449,6 +930,7 @@ function App() {
           x2={current.x}
           y2={current.y}
           stroke={strokeColor}
+          strokeDasharray={lineStyleToDash(lineStyle, strokeWidth)}
           strokeWidth={strokeWidth}
           markerEnd={tool === "arrow" ? `url(#arrow-${page})` : undefined}
           pointerEvents="none"
@@ -466,6 +948,7 @@ function App() {
           height={rect.h}
           fill="transparent"
           stroke={strokeColor}
+          strokeDasharray={lineStyleToDash(lineStyle, strokeWidth)}
           strokeWidth={strokeWidth}
           pointerEvents="none"
         />
@@ -483,8 +966,9 @@ function App() {
         <path
           d={polylineToPath(drawingState.points)}
           fill="none"
-          stroke={strokeColor}
-          strokeWidth={DEFAULT_HIGHLIGHTER_WIDTH}
+          stroke={highlighterColor}
+          strokeDasharray={lineStyleToDash(lineStyle, highlighterWidth)}
+          strokeWidth={highlighterWidth}
           opacity={0.35}
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -530,6 +1014,9 @@ function App() {
           <button type="button" onClick={() => void exportAnnotatedPngs()} disabled={!pdfDoc}>
             Export PNG
           </button>
+          <button type="button" onClick={() => void exportFlattenedPdf()} disabled={!pdfDoc}>
+            Export Flattened PDF
+          </button>
         </div>
 
         <div className="group">
@@ -550,11 +1037,19 @@ function App() {
 
         <div className="group">
           <label>
-            Color
+            Line color
             <input type="color" value={strokeColor} onChange={(event) => setStrokeColor(event.target.value)} />
           </label>
           <label>
-            Width
+            Highlighter
+            <input
+              type="color"
+              value={highlighterColor}
+              onChange={(event) => setHighlighterColor(event.target.value)}
+            />
+          </label>
+          <label>
+            Line width
             <input
               type="range"
               min={1}
@@ -562,6 +1057,24 @@ function App() {
               value={strokeWidth}
               onChange={(event) => setStrokeWidth(Number(event.target.value))}
             />
+          </label>
+          <label>
+            HL width
+            <input
+              type="range"
+              min={2}
+              max={24}
+              value={highlighterWidth}
+              onChange={(event) => setHighlighterWidth(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Line type
+            <select value={lineStyle} onChange={(event) => setLineStyle(event.target.value as LineStyle)}>
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
           </label>
           <label>
             Zoom
@@ -625,77 +1138,168 @@ function App() {
             Clear
           </button>
         </div>
+
+        {selectedAnnotation ? (
+          <div className="group">
+            <strong>Selected</strong>
+            <label>
+              Color
+              <input
+                type="color"
+                value={selectedAnnotation.color}
+                onChange={(event) =>
+                  updateSelectedAnnotation((annotation) => ({ ...annotation, color: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Weight
+              <input
+                type="range"
+                min={1}
+                max={24}
+                value={selectedAnnotation.strokeWidth}
+                onChange={(event) =>
+                  updateSelectedAnnotation((annotation) => ({
+                    ...annotation,
+                    strokeWidth: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Type
+              <select
+                value={selectedAnnotation.lineStyle ?? "solid"}
+                onChange={(event) =>
+                  updateSelectedAnnotation((annotation) => ({
+                    ...annotation,
+                    lineStyle: event.target.value as LineStyle,
+                  }))
+                }
+              >
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+              </select>
+            </label>
+            {selectedAnnotation.type === "highlighter" ? (
+              <label>
+                Opacity
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={selectedAnnotation.opacity}
+                  onChange={(event) =>
+                    updateSelectedAnnotation((annotation) =>
+                      annotation.type === "highlighter"
+                        ? { ...annotation, opacity: Number(event.target.value) }
+                        : annotation,
+                    )
+                  }
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       <main className="viewer">
         {!pdfDoc ? (
           <div className="empty">Upload a PDF to start annotating.</div>
         ) : (
-          pages.map((page) => {
-            const size = pageSizes[page];
-            return (
-              <section key={page} className="pageSection">
-                <div className="pageHeader">
-                  <h3>
-                    Page {page} / {pageCount}
-                  </h3>
-                  <span>{pdfName}</span>
-                </div>
-
-                <div
-                  className="pageCanvasWrap"
-                  style={{
-                    width: size?.width ?? "fit-content",
-                    height: size?.height ?? "fit-content",
-                  }}
+          <div className="workspaceLayout">
+            <aside className="thumbRail">
+              {pages.map((page) => (
+                <button
+                  key={`thumb-${page}`}
+                  type="button"
+                  className="thumbButton"
+                  onClick={() => pageRefs.current[page]?.scrollIntoView({ behavior: "smooth", block: "start" })}
                 >
-                  <canvas
+                  <span>Page {page}</span>
+                  {thumbnails[page] ? <img src={thumbnails[page]} alt={`Page ${page} thumbnail`} /> : null}
+                </button>
+              ))}
+            </aside>
+            <section className="pagesColumn">
+              {pages.map((page) => {
+                const size = pageSizes[page];
+                return (
+                  <section
+                    key={page}
                     ref={(el) => {
-                      canvasRefs.current[page] = el;
+                      pageRefs.current[page] = el;
                     }}
-                    className="pdfCanvas"
-                  />
-                  {size ? (
-                    <svg
-                      ref={(el) => {
-                        svgRefs.current[page] = el;
-                      }}
-                      className="overlay"
-                      width={size.width}
-                      height={size.height}
-                      viewBox={`0 0 ${size.width} ${size.height}`}
-                      onPointerDown={(event) => onPointerDown(page, event)}
-                      onPointerMove={(event) => onPointerMove(page, event)}
-                      onPointerUp={() => onPointerUp(page)}
-                      onPointerLeave={() => onPointerUp(page)}
-                      onClick={() => {
-                        if (tool === "select") setSelectedId(null);
+                    className="pageSection"
+                  >
+                    <div className="pageHeader">
+                      <h3>
+                        Page {page} / {pageCount}
+                      </h3>
+                      <span>{pdfName}</span>
+                    </div>
+
+                    <div
+                      className="pageCanvasWrap"
+                      style={{
+                        width: size?.width ?? "fit-content",
+                        height: size?.height ?? "fit-content",
                       }}
                     >
-                      <defs>
-                        <marker
-                          id={`arrow-${page}`}
-                          markerWidth="10"
-                          markerHeight="10"
-                          refX="8"
-                          refY="3"
-                          orient="auto"
-                          markerUnits="strokeWidth"
+                      <canvas
+                        ref={(el) => {
+                          canvasRefs.current[page] = el;
+                        }}
+                        className="pdfCanvas"
+                      />
+                      {size ? (
+                        <svg
+                          ref={(el) => {
+                            svgRefs.current[page] = el;
+                          }}
+                          className="overlay"
+                          width={size.width}
+                          height={size.height}
+                          viewBox={`0 0 ${size.width} ${size.height}`}
+                          onPointerDown={(event) => onPointerDown(page, event)}
+                          onPointerMove={(event) => onPointerMove(page, event)}
+                          onPointerUp={() => onOverlayPointerUp(page)}
+                          onPointerLeave={() => onOverlayPointerUp(page)}
                         >
-                          <path d="M0,0 L0,6 L9,3 z" fill={strokeColor} />
-                        </marker>
-                      </defs>
+                          <defs>
+                            <marker
+                              id={`arrow-${page}`}
+                              markerWidth="10"
+                              markerHeight="10"
+                              refX="8"
+                              refY="3"
+                              orient="auto"
+                              markerUnits="strokeWidth"
+                            >
+                              <path d="M0,0 L0,6 L9,3 z" fill={strokeColor} />
+                            </marker>
+                          </defs>
 
-                      {annotations
-                        .filter((annotation) => annotation.page === page)
-                        .map((annotation) => renderAnnotation(annotation, page))}
-                      {renderActiveShape(page)}
-                    </svg>
-                  ) : null}
-                </div>
-              </section>
-            );
-          })
+                          {annotations
+                            .filter((annotation) => annotation.page === page)
+                            .map((annotation) => (
+                              <g key={annotation.id}>
+                                {renderAnnotation(annotation, page)}
+                                {renderSelectionHandles(annotation, page)}
+                              </g>
+                            ))}
+                          {renderActiveShape(page)}
+                        </svg>
+                      ) : null}
+                    </div>
+                  </section>
+                );
+              })}
+            </section>
+          </div>
         )}
       </main>
     </div>

@@ -1,4 +1,4 @@
-import type { Point } from "./types";
+import type { LineStyle, Point } from "./types";
 
 export function clamp01(value: number): number {
   if (value < 0) return 0;
@@ -88,6 +88,16 @@ export function polylineToPath(points: Point[]): string {
     }
     return `${acc} L ${point.x} ${point.y}`;
   }, "");
+}
+
+export function lineStyleToDash(style: LineStyle, weight: number): string | undefined {
+  if (style === "dashed") {
+    return `${weight * 4} ${weight * 2}`;
+  }
+  if (style === "dotted") {
+    return `${weight} ${weight * 1.5}`;
+  }
+  return undefined;
 }
 
 export function downloadBlob(blob: Blob, fileName: string): void {

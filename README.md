@@ -12,12 +12,20 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - cloud callout
   - highlighter
   - custom stamps (text stamps and uploaded image stamps)
-- Select + delete annotations
+- Select + drag existing annotations
+- Resize handles for line endpoints, rectangles, clouds, and stamps
 - Undo last annotation and clear all
 - Zoom support
+- Page thumbnails with click-to-scroll navigation
+- Styling controls:
+  - line/highlighter color
+  - line/highlighter weight
+  - line type (solid, dashed, dotted)
+  - selected annotation style editing (including highlighter opacity)
 - Save markups as JSON
 - Load markups from JSON
 - Export annotated pages as PNG snapshots
+- Export a flattened PDF with markups burned in
 
 ## Run locally
 

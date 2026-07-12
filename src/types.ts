@@ -14,11 +14,14 @@ export type Point = {
 
 export type NormalizedPoint = Point;
 
+export type LineStyle = "solid" | "dashed" | "dotted";
+
 export type BaseAnnotation = {
   id: string;
   page: number;
   color: string;
   strokeWidth: number;
+  lineStyle: LineStyle;
 };
 
 export type LineAnnotation = BaseAnnotation & {
