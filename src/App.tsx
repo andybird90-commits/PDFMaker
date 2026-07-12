@@ -662,6 +662,15 @@ function App() {
   }, [opsRoute]);
 
   useEffect(() => {
+    if (activeModule === "markup-studio") return;
+    if (opsRoute.name !== "projects" || opsRoute.section !== "file-open" || !opsRoute.fileId) return;
+    const file = projectFiles.find((item) => item.id === opsRoute.fileId);
+    if (!file) return;
+    if (projectEditorContext?.fileId === file.id) return;
+    void openProjectFileInEditor(file);
+  }, [activeModule, opsRoute, projectFiles, projectEditorContext]);
+
+  useEffect(() => {
     if (!selectedProjectFile?.dataUrl) {
       setProjectPreviewUrl("");
       return;
@@ -2331,6 +2340,15 @@ function App() {
     notify(`Opened ${file.name} in PDF editor.`);
   }
 
+  async function openProjectFileFullView(file: ProjectFile, projectSlug: string): Promise<void> {
+    if (!projectPermission.usePdfMarkup) {
+      notify("You do not have permission to use PDF markup.");
+      return;
+    }
+    navigateOps(`/projects/${projectSlug}/files/${encodeURIComponent(file.id)}`);
+    await openProjectFileInEditor(file);
+  }
+
   async function saveProjectFileMarkup(
     fileId: string,
     result: { pdfBlob: Blob; annotations: unknown },
@@ -2422,6 +2440,7 @@ function App() {
           : item,
       ),
     );
+    setOpenFileNeedsSaveWarning(false);
     logProjectActivity("markup saved", target.name, projectEditorContext.projectId);
     notify(`Saved ${target.name} back to project (v${currentVersion + 1}).`);
     return true;
@@ -2474,6 +2493,10 @@ function App() {
   }
 
   function exitProjectMarkupStudio(): void {
+    if (openFileNeedsSaveWarning) {
+      const confirmed = window.confirm("If you go back now, unsaved changes may be lost. Continue?");
+      if (!confirmed) return;
+    }
     if (!projectEditorContext) {
       navigateOps("/projects");
       return;
@@ -3955,19 +3978,12 @@ function App() {
               </div>
               {openFile ? (
                 openFile.mimeType?.includes("pdf") || openFile.name.toLowerCase().endsWith(".pdf") ? (
-                  projectPreviewUrl ? (
-                    <div className="opsOpenFileEditorWrap">
-                      <PdfEditor
-                        url={projectPreviewUrl}
-                        initialAnnotations={openFile.annotations}
-                        readOnly={!projectPermission.usePdfMarkup}
-                        onSave={(result) => saveProjectFileMarkup(openFile.id, result)}
-                        onClose={() => leaveOpenFileView(workspaceProject?.slug ?? "project")}
-                      />
-                    </div>
-                  ) : (
-                    <p>No PDF preview URL available for this file.</p>
-                  )
+                  <div className="opsFileDetails">
+                    <p>Opening full markup editor for this drawing...</p>
+                    <button type="button" onClick={() => void openProjectFileInEditor(openFile)}>
+                      Re-open Editor
+                    </button>
+                  </div>
                 ) : openFile.mimeType?.startsWith("image/") && openFile.dataUrl ? (
                   <img src={openFile.dataUrl} alt={openFile.name} className="opsPreviewImage" />
                 ) : (
@@ -4055,7 +4071,7 @@ function App() {
                       <div className="opsInline opsFileRowActions">
                         <button
                           type="button"
-                          onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? "project"}/files/${encodeURIComponent(file.id)}`)}
+                          onClick={() => void openProjectFileFullView(file, workspaceProject?.slug ?? "project")}
                         >
                           Open
                         </button>
@@ -4115,7 +4131,7 @@ function App() {
                         <p>PDF preview unavailable.</p>
                       )}
                       <div className="opsInline">
-                        <button type="button" onClick={() => void openProjectFileInEditor(selectedProjectFile)}>
+                        <button type="button" onClick={() => void openProjectFileFullView(selectedProjectFile, workspaceProject?.slug ?? "project")}>
                           Open in full editor
                         </button>
                         <button type="button" onClick={() => downloadProjectFile(selectedProjectFile)}>
