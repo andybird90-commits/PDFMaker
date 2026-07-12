@@ -2107,7 +2107,25 @@ function App() {
         logProjectActivity("file uploaded", file.name, selectedProjectId);
         notify(`Added file ${file.name}.`);
       } catch (error) {
-        notify(`Add file failed: ${error instanceof Error ? error.message : String(error)}`);
+        const fallbackFile: ProjectFile = {
+          id: makeId(),
+          projectId: selectedProjectId,
+          folderId: selectedFolderId,
+          name,
+          updatedAt: new Date().toISOString(),
+          status: "Draft",
+          mimeType: override?.mimeType,
+          dataUrl: override?.dataUrl,
+          uploadedBy: override?.uploadedBy ?? CURRENT_USER.name,
+          version: 1,
+        };
+        setProjectFiles((prev) => [fallbackFile, ...prev]);
+        setNewFileName("");
+        logProjectActivity("file uploaded", fallbackFile.name, selectedProjectId);
+        notify(
+          `Cloud upload unavailable (${error instanceof Error ? error.message : String(error)}). ` +
+            `File saved locally for this session.`,
+        );
       } finally {
         setOpsLoading(false);
       }
