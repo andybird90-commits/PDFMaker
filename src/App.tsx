@@ -664,6 +664,18 @@ function App() {
     setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale)));
   }
 
+  function zoomIn(): void {
+    setScale((prev) => Math.min(MAX_SCALE, prev + 0.1));
+  }
+
+  function zoomOut(): void {
+    setScale((prev) => Math.max(MIN_SCALE, prev - 0.1));
+  }
+
+  function zoomReset(): void {
+    setScale(1.25);
+  }
+
   function onViewportMouseDown(event: React.MouseEvent<HTMLElement>): void {
     if (event.button !== 1) return;
     const target = event.currentTarget;
@@ -705,6 +717,10 @@ function App() {
     if (!activeCustomStampId) return;
     setCustomStamps((prev) => prev.filter((stamp) => stamp.id !== activeCustomStampId));
     setActiveCustomStampId("");
+  }
+
+  function triggerLoadMarkupsDialog(): void {
+    loadMarkupInputRef.current?.click();
   }
 
   function applyPinStatus(status: PinStatus): void {
@@ -1429,6 +1445,97 @@ function App() {
   return (
     <div className="app">
       <header className="toolbar">
+        <nav className="menuBar" aria-label="Application menu">
+          <details className="menuItem">
+            <summary>File</summary>
+            <div className="menuPanel">
+              <button type="button" onClick={() => void triggerOpenDialog()}>
+                Open...
+              </button>
+              <button type="button" onClick={() => void savePdf()} disabled={!pdfDoc}>
+                Save
+              </button>
+              <button type="button" onClick={() => void savePdfAs()} disabled={!pdfDoc}>
+                Save As...
+              </button>
+              <button type="button" onClick={triggerLoadMarkupsDialog}>
+                Open Markups...
+              </button>
+              <button type="button" onClick={saveMarkupJson} disabled={annotations.length === 0}>
+                Save Markups
+              </button>
+              <button type="button" onClick={() => void exportFlattenedPdf()} disabled={!pdfDoc}>
+                Export PDF
+              </button>
+              <button type="button" onClick={() => void exportAnnotatedPngs()} disabled={!pdfDoc}>
+                Export PNG
+              </button>
+              <button
+                type="button"
+                onClick={exportPinsJson}
+                disabled={!annotations.some((annotation) => annotation.type === "pin")}
+              >
+                Export Pins JSON
+              </button>
+              <button
+                type="button"
+                onClick={exportPinsCsv}
+                disabled={!annotations.some((annotation) => annotation.type === "pin")}
+              >
+                Export Pins CSV
+              </button>
+            </div>
+          </details>
+
+          <details className="menuItem">
+            <summary>Edit</summary>
+            <div className="menuPanel">
+              <button type="button" onClick={undoLast} disabled={annotations.length === 0}>
+                Undo
+              </button>
+              <button type="button" onClick={removeSelected} disabled={!selectedId}>
+                Delete Selected
+              </button>
+              <button type="button" onClick={clearAll} disabled={annotations.length === 0}>
+                Clear All
+              </button>
+            </div>
+          </details>
+
+          <details className="menuItem">
+            <summary>View</summary>
+            <div className="menuPanel">
+              <button type="button" onClick={zoomIn}>
+                Zoom In
+              </button>
+              <button type="button" onClick={zoomOut}>
+                Zoom Out
+              </button>
+              <button type="button" onClick={zoomReset}>
+                Reset Zoom
+              </button>
+            </div>
+          </details>
+
+          <details className="menuItem">
+            <summary>Tools</summary>
+            <div className="menuPanel">
+              {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp", "pin"] as Tool[]).map((name) => (
+                <button
+                  key={`menu-${name}`}
+                  type="button"
+                  onClick={() => {
+                    setTool(name);
+                    setSelectedId(null);
+                  }}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </details>
+        </nav>
+
         <div className="group">
           <button type="button" onClick={() => void triggerOpenDialog()}>
             Open

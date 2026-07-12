@@ -39,6 +39,58 @@ body {
   z-index: 3;
 }
 
+.menuBar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #363c49;
+  margin-bottom: 0.2rem;
+}
+
+.menuItem {
+  position: relative;
+}
+
+.menuItem summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: #e2e8f0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 5px;
+}
+
+.menuItem summary::-webkit-details-marker {
+  display: none;
+}
+
+.menuItem[open] summary,
+.menuItem summary:hover {
+  background: #2a3342;
+}
+
+.menuPanel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: #1b2230;
+  border: 1px solid #475269;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+}
+
+.menuPanel button {
+  text-align: left;
+}
+
 .group {
   display: flex;
   gap: 0.4rem;
