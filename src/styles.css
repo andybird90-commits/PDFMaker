@@ -92,6 +92,23 @@ body {
   gap: 0.55rem;
 }
 
+.toolbarPanelPicker {
+  display: none;
+  width: 100%;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid #354154;
+}
+
+.toolbarPanelPicker.isVisible {
+  display: flex;
+}
+
+.toolbarPanel.isHidden {
+  display: none;
+}
+
 .group {
   display: flex;
   gap: 0.35rem;
@@ -1235,5 +1252,14 @@ label {
   }
   .thumbButton {
     min-width: 120px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .toolbarGrid {
+    grid-template-columns: 1fr;
+  }
+  .panel {
+    min-height: auto;
   }
 }

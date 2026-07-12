@@ -146,6 +146,7 @@ type BatchDocument = {
   calibrationByPage: Record<number, number>;
   rotationByPage: Record<number, number>;
 };
+type ToolbarPanel = "file" | "tools" | "view" | "stamps" | "edit" | "selected";
 type ProjectEditorContext = {
   projectId: string;
   fileId: string;
@@ -387,6 +388,8 @@ function App() {
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
   const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
   const [openFileNeedsSaveWarning, setOpenFileNeedsSaveWarning] = useState<boolean>(false);
+  const [isCompactToolbar, setIsCompactToolbar] = useState<boolean>(() => window.innerWidth <= 1280);
+  const [activeToolbarPanel, setActiveToolbarPanel] = useState<ToolbarPanel>("tools");
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -640,6 +643,14 @@ function App() {
     if (opsRoute.name !== "sign-in" && opsRoute.name !== "sign-out") return;
     void refreshLiveGps();
   }, [activeModule, opsRoute.name]);
+
+  useEffect(() => {
+    function onResize(): void {
+      setIsCompactToolbar(window.innerWidth <= 1280);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     if (opsRoute.name !== "projects" || !opsRoute.projectId) return;
@@ -4601,8 +4612,35 @@ function App() {
           </div>
         ) : null}
 
+        <div className={`toolbarPanelPicker ${isCompactToolbar ? "isVisible" : ""}`}>
+          <button type="button" className={activeToolbarPanel === "file" ? "active" : ""} onClick={() => setActiveToolbarPanel("file")}>
+            File
+          </button>
+          <button type="button" className={activeToolbarPanel === "tools" ? "active" : ""} onClick={() => setActiveToolbarPanel("tools")}>
+            Tools
+          </button>
+          <button type="button" className={activeToolbarPanel === "view" ? "active" : ""} onClick={() => setActiveToolbarPanel("view")}>
+            View
+          </button>
+          <button type="button" className={activeToolbarPanel === "stamps" ? "active" : ""} onClick={() => setActiveToolbarPanel("stamps")}>
+            Stamps
+          </button>
+          <button type="button" className={activeToolbarPanel === "edit" ? "active" : ""} onClick={() => setActiveToolbarPanel("edit")}>
+            Edit
+          </button>
+          {selectedAnnotation ? (
+            <button
+              type="button"
+              className={activeToolbarPanel === "selected" ? "active" : ""}
+              onClick={() => setActiveToolbarPanel("selected")}
+            >
+              Selected
+            </button>
+          ) : null}
+        </div>
+
         <div className="toolbarGrid">
-        <div className="group panel panel-files">
+        <div className={`group panel panel-files toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "file" ? "isHidden" : ""}`}>
           <span className="panelTitle">File</span>
           <button type="button" onClick={() => void triggerOpenDialog()}>
             Open
@@ -4689,7 +4727,7 @@ function App() {
           </button>
         </div>
 
-        <div className="group panel panel-tools">
+        <div className={`group panel panel-tools toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "tools" ? "isHidden" : ""}`}>
           <span className="panelTitle">Tools</span>
           {([
             "select",
@@ -4718,7 +4756,7 @@ function App() {
           ))}
         </div>
 
-        <div className="group panel panel-view">
+        <div className={`group panel panel-view toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "view" ? "isHidden" : ""}`}>
           <span className="panelTitle">View & Measure</span>
           <label>
             Line color
@@ -4810,7 +4848,7 @@ function App() {
           </button>
         </div>
 
-        <div className="group panel panel-stamps">
+        <div className={`group panel panel-stamps toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "stamps" ? "isHidden" : ""}`}>
           <span className="panelTitle">Stamps</span>
           <label>
             Standard stamp
@@ -4886,7 +4924,7 @@ function App() {
           </label>
         </div>
 
-        <div className="group panel panel-edit">
+        <div className={`group panel panel-edit toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "edit" ? "isHidden" : ""}`}>
           <span className="panelTitle">Edit</span>
           <button type="button" onClick={undoLast} disabled={annotations.length === 0}>
             Undo
@@ -4900,7 +4938,9 @@ function App() {
         </div>
 
         {selectedAnnotation ? (
-          <div className="group panel panel-selected">
+          <div
+            className={`group panel panel-selected toolbarPanel ${isCompactToolbar && activeToolbarPanel !== "selected" ? "isHidden" : ""}`}
+          >
             <details className="selectedDetails">
               <summary>
                 Selected Annotation
