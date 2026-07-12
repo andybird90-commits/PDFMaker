@@ -73,3 +73,12 @@ export type MarkupDocument = {
   createdAt: string;
   annotations: Annotation[];
 };
+
+export type EditorProjectDocument = {
+  schemaVersion: 1;
+  kind: "pdfmaker-project";
+  fileName: string;
+  createdAt: string;
+  pdfData: string;
+  annotations: Annotation[];
+};

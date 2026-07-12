@@ -12,7 +12,15 @@ import {
   polylineToPath,
   rectFromPoints,
 } from "./annotationUtils";
-import type { Annotation, LineStyle, MarkupDocument, Point, StampAnnotation, Tool } from "./types";
+import type {
+  Annotation,
+  EditorProjectDocument,
+  LineStyle,
+  MarkupDocument,
+  Point,
+  StampAnnotation,
+  Tool,
+} from "./types";
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 
@@ -41,6 +49,16 @@ type PageSize = { width: number; height: number };
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
 const DEFAULT_HIGHLIGHTER_COLOR = "#ffe45e";
+const MIN_SCALE = 0.4;
+const MAX_SCALE = 4;
+
+const STAMP_PRESETS: Array<{ id: string; label: string; color: string }> = [
+  { id: "approved", label: "APPROVED", color: "#0f766e" },
+  { id: "construction", label: "CONSTRUCTION", color: "#1d4ed8" },
+  { id: "status-a", label: "STATUS A", color: "#059669" },
+  { id: "status-b", label: "STATUS B", color: "#ca8a04" },
+  { id: "status-c", label: "STATUS C", color: "#dc2626" },
+];
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -70,10 +88,17 @@ function App() {
   const [stampLabel, setStampLabel] = useState<string>("APPROVED");
   const [stampImageDataUrl, setStampImageDataUrl] = useState<string | null>(null);
   const [stampOpacity, setStampOpacity] = useState<number>(0.95);
+  const [activeStampPresetId, setActiveStampPresetId] = useState<string>("approved");
+  const [projectFileHandle, setProjectFileHandle] = useState<any | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
   const pageRefs = useRef<Record<number, HTMLElement | null>>({});
+  const pagesScrollRef = useRef<HTMLElement | null>(null);
+  const openInputRef = useRef<HTMLInputElement | null>(null);
+  const loadMarkupInputRef = useRef<HTMLInputElement | null>(null);
+  const [isMiddlePanning, setIsMiddlePanning] = useState<boolean>(false);
+  const panStateRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null);
 
   const sortedAnnotations = useMemo(
     () => [...annotations].sort((a, b) => a.page - b.page),
@@ -83,6 +108,15 @@ function App() {
     () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
     [annotations, selectedId],
   );
+  const activeStampPreset = useMemo(
+    () => STAMP_PRESETS.find((preset) => preset.id === activeStampPresetId) ?? STAMP_PRESETS[0],
+    [activeStampPresetId],
+  );
+
+  useEffect(() => {
+    setStampLabel(activeStampPreset.label);
+    setStrokeColor(activeStampPreset.color);
+  }, [activeStampPreset]);
 
   useEffect(() => {
     if (!pdfDoc || pageCount === 0) {
@@ -159,17 +193,151 @@ function App() {
     };
   }, [pdfDoc, pageCount]);
 
-  async function handleFileUpload(file: File | null): Promise<void> {
-    if (!file) return;
-    const data = new Uint8Array(await file.arrayBuffer());
+  async function loadPdfBytes(data: Uint8Array, fileName: string): Promise<void> {
     const loadingTask = getDocument({ data });
     const doc = await loadingTask.promise;
     setPdfDoc(doc);
     setPdfBytes(data);
-    setPdfName(file.name);
+    setPdfName(fileName);
     setPageCount(doc.numPages);
-    setAnnotations([]);
     setSelectedId(null);
+  }
+
+  function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  function base64ToBytes(base64: string): Uint8Array {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  async function handlePdfFile(file: File): Promise<void> {
+    const data = new Uint8Array(await file.arrayBuffer());
+    await loadPdfBytes(data, file.name);
+    setAnnotations([]);
+    setProjectFileHandle(null);
+  }
+
+  async function handleProjectOpen(parsed: EditorProjectDocument): Promise<void> {
+    if (parsed.kind !== "pdfmaker-project" || typeof parsed.pdfData !== "string") {
+      throw new Error("Invalid project file.");
+    }
+    const bytes = base64ToBytes(parsed.pdfData);
+    await loadPdfBytes(bytes, parsed.fileName || "project.pdf");
+    setAnnotations(
+      (parsed.annotations ?? []).map((annotation) => ({
+        ...annotation,
+        lineStyle: annotation.lineStyle ?? "solid",
+      })),
+    );
+  }
+
+  async function handleOpenFile(file: File | null): Promise<"pdf" | "project" | "markups" | "unknown"> {
+    if (!file) return "unknown";
+    if (file.name.toLowerCase().endsWith(".pdf")) {
+      await handlePdfFile(file);
+      return "pdf";
+    }
+    const text = await file.text();
+    const parsed = JSON.parse(text) as MarkupDocument | EditorProjectDocument;
+    if ((parsed as EditorProjectDocument).kind === "pdfmaker-project") {
+      await handleProjectOpen(parsed as EditorProjectDocument);
+      return "project";
+    }
+    if (Array.isArray((parsed as MarkupDocument).annotations)) {
+      setAnnotations(
+        (parsed as MarkupDocument).annotations.map((annotation) => ({
+          ...annotation,
+          lineStyle: annotation.lineStyle ?? "solid",
+        })),
+      );
+      setSelectedId(null);
+      return "markups";
+    }
+    throw new Error("Unsupported file format. Use PDF, project JSON, or markups JSON.");
+  }
+
+  async function triggerOpenDialog(): Promise<void> {
+    if (typeof (window as any).showOpenFilePicker === "function") {
+      const [handle] = await (window as any).showOpenFilePicker({
+        multiple: false,
+        types: [
+          {
+            description: "PDFMaker files",
+            accept: {
+              "application/pdf": [".pdf"],
+              "application/json": [".json", ".pdfmaker.json"],
+            },
+          },
+        ],
+      });
+      if (!handle) return;
+      const file = await handle.getFile();
+      const opened = await handleOpenFile(file);
+      setProjectFileHandle(opened === "project" ? handle : null);
+      return;
+    }
+    openInputRef.current?.click();
+  }
+
+  function buildProjectDocument(): EditorProjectDocument | null {
+    if (!pdfBytes) return null;
+    return {
+      schemaVersion: 1,
+      kind: "pdfmaker-project",
+      fileName: pdfName,
+      createdAt: new Date().toISOString(),
+      pdfData: bytesToBase64(pdfBytes),
+      annotations: sortedAnnotations,
+    };
+  }
+
+  async function saveProjectToHandle(handle: any): Promise<void> {
+    const payload = buildProjectDocument();
+    if (!payload) return;
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(payload, null, 2));
+    await writable.close();
+  }
+
+  async function saveProject(): Promise<void> {
+    if (!pdfBytes) return;
+    if (projectFileHandle) {
+      await saveProjectToHandle(projectFileHandle);
+      return;
+    }
+    await saveProjectAs();
+  }
+
+  async function saveProjectAs(): Promise<void> {
+    const payload = buildProjectDocument();
+    if (!payload) return;
+    if (typeof (window as any).showSaveFilePicker === "function") {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: `${pdfName.replace(/\.pdf$/i, "")}.pdfmaker.json`,
+        types: [
+          {
+            description: "PDFMaker project",
+            accept: { "application/json": [".pdfmaker.json", ".json"] },
+          },
+        ],
+      });
+      if (!handle) return;
+      await saveProjectToHandle(handle);
+      setProjectFileHandle(handle);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pdfmaker.json`);
   }
 
   function getEventPoint(event: React.PointerEvent<SVGSVGElement>, page: number): Point | null {
@@ -195,6 +363,7 @@ function App() {
     handle?: string,
   ): void {
     if (tool !== "select") return;
+    if (event.button !== 0) return;
     event.stopPropagation();
     const svg = svgRefs.current[page];
     if (!svg) return;
@@ -280,6 +449,7 @@ function App() {
   }
 
   function onPointerDown(page: number, event: React.PointerEvent<SVGSVGElement>): void {
+    if (event.button !== 0) return;
     if (tool === "select") {
       setSelectedId(null);
       return;
@@ -392,6 +562,40 @@ function App() {
   function clearAll(): void {
     setAnnotations([]);
     setSelectedId(null);
+  }
+
+  function onViewportWheel(event: React.WheelEvent<HTMLElement>): void {
+    if (!pdfDoc) return;
+    event.preventDefault();
+    const nextScale = scale - event.deltaY * 0.0012;
+    setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale)));
+  }
+
+  function onViewportMouseDown(event: React.MouseEvent<HTMLElement>): void {
+    if (event.button !== 1) return;
+    const target = event.currentTarget;
+    event.preventDefault();
+    setIsMiddlePanning(true);
+    panStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      left: target.scrollLeft,
+      top: target.scrollTop,
+    };
+  }
+
+  function onViewportMouseMove(event: React.MouseEvent<HTMLElement>): void {
+    if (!isMiddlePanning || !panStateRef.current) return;
+    const target = event.currentTarget;
+    const dx = event.clientX - panStateRef.current.startX;
+    const dy = event.clientY - panStateRef.current.startY;
+    target.scrollLeft = panStateRef.current.left - dx;
+    target.scrollTop = panStateRef.current.top - dy;
+  }
+
+  function endViewportPan(): void {
+    setIsMiddlePanning(false);
+    panStateRef.current = null;
   }
 
   function saveMarkupJson(): void {
@@ -986,24 +1190,49 @@ function App() {
     <div className="app">
       <header className="toolbar">
         <div className="group">
+          <button type="button" onClick={() => void triggerOpenDialog()}>
+            Open
+          </button>
+          <input
+            ref={openInputRef}
+            type="file"
+            accept=".pdf,.json,.pdfmaker.json,application/pdf,application/json"
+            className="hiddenInput"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              void handleOpenFile(file);
+              setProjectFileHandle(null);
+              event.currentTarget.value = "";
+            }}
+          />
+          <button type="button" onClick={() => void saveProject()} disabled={!pdfDoc}>
+            Save
+          </button>
+          <button type="button" onClick={() => void saveProjectAs()} disabled={!pdfDoc}>
+            Save As
+          </button>
           <label className="uploadLabel">
-            Open PDF
+            Open Markups
             <input
+              ref={loadMarkupInputRef}
               type="file"
-              accept="application/pdf"
+              accept="application/json"
               onChange={(event) => {
-                void handleFileUpload(event.target.files?.[0] ?? null);
+                void loadMarkupJson(event.target.files?.[0] ?? null);
                 event.currentTarget.value = "";
               }}
             />
           </label>
           <label className="uploadLabel">
-            Load Markups
+            Import PDF
             <input
               type="file"
-              accept="application/json"
+              accept="application/pdf"
               onChange={(event) => {
-                void loadMarkupJson(event.target.files?.[0] ?? null);
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handlePdfFile(file);
+                }
                 event.currentTarget.value = "";
               }}
             />
@@ -1090,6 +1319,26 @@ function App() {
         </div>
 
         <div className="group">
+          <label>
+            Standard stamp
+            <select
+              value={activeStampPresetId}
+              onChange={(event) => {
+                const selected = STAMP_PRESETS.find((preset) => preset.id === event.target.value);
+                setActiveStampPresetId(event.target.value);
+                if (selected) {
+                  setStampLabel(selected.label);
+                  setStrokeColor(selected.color);
+                }
+              }}
+            >
+              {STAMP_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             Stamp text
             <input type="text" value={stampLabel} onChange={(event) => setStampLabel(event.target.value)} />
@@ -1224,7 +1473,15 @@ function App() {
                 </button>
               ))}
             </aside>
-            <section className="pagesColumn">
+            <section
+              ref={pagesScrollRef}
+              className={`pagesColumn ${isMiddlePanning ? "isPanning" : ""}`}
+              onWheel={onViewportWheel}
+              onMouseDown={onViewportMouseDown}
+              onMouseMove={onViewportMouseMove}
+              onMouseUp={endViewportPan}
+              onMouseLeave={endViewportPan}
+            >
               {pages.map((page) => {
                 const size = pageSizes[page];
                 return (

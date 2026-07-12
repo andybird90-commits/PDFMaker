@@ -86,6 +86,10 @@ label {
   max-width: 12rem;
 }
 
+.hiddenInput {
+  display: none;
+}
+
 .viewer {
   padding: 0.8rem;
 }
@@ -129,6 +133,15 @@ label {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  max-height: calc(100vh - 112px);
+  overflow: auto;
+  padding-right: 0.35rem;
+  cursor: zoom-in;
+}
+
+.pagesColumn.isPanning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .empty {
