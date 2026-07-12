@@ -45,12 +45,14 @@ type InteractionState =
   | null;
 
 type PageSize = { width: number; height: number };
+type CustomStamp = { id: string; name: string; dataUrl: string };
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
 const DEFAULT_HIGHLIGHTER_COLOR = "#ffe45e";
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 4;
+const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
 
 const STAMP_PRESETS: Array<{ id: string; label: string; color: string }> = [
   { id: "approved", label: "APPROVED", color: "#0f766e" },
@@ -86,9 +88,10 @@ function App() {
   const [interaction, setInteraction] = useState<InteractionState>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stampLabel, setStampLabel] = useState<string>("APPROVED");
-  const [stampImageDataUrl, setStampImageDataUrl] = useState<string | null>(null);
   const [stampOpacity, setStampOpacity] = useState<number>(0.95);
   const [activeStampPresetId, setActiveStampPresetId] = useState<string>("approved");
+  const [customStamps, setCustomStamps] = useState<CustomStamp[]>([]);
+  const [activeCustomStampId, setActiveCustomStampId] = useState<string>("");
   const [pdfFileHandle, setPdfFileHandle] = useState<any | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -113,11 +116,32 @@ function App() {
     () => STAMP_PRESETS.find((preset) => preset.id === activeStampPresetId) ?? STAMP_PRESETS[0],
     [activeStampPresetId],
   );
+  const activeCustomStamp = useMemo(
+    () => customStamps.find((stamp) => stamp.id === activeCustomStampId) ?? null,
+    [customStamps, activeCustomStampId],
+  );
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
     setStrokeColor(activeStampPreset.color);
   }, [activeStampPreset]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CUSTOM_STAMPS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CustomStamp[];
+      if (!Array.isArray(parsed)) return;
+      const valid = parsed.filter((stamp) => typeof stamp?.id === "string" && typeof stamp?.dataUrl === "string");
+      setCustomStamps(valid);
+    } catch {
+      // Ignore malformed local cache and continue.
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(CUSTOM_STAMPS_STORAGE_KEY, JSON.stringify(customStamps));
+  }, [customStamps]);
 
   useEffect(() => {
     if (!pdfDoc || pageCount === 0) {
@@ -424,11 +448,11 @@ function App() {
         opacity: stampOpacity,
       };
 
-      if (stampImageDataUrl) {
+      if (activeCustomStamp) {
         addAnnotation({
           ...baseStamp,
           stampKind: "image",
-          imageDataUrl: stampImageDataUrl,
+          imageDataUrl: activeCustomStamp.dataUrl,
         });
       } else {
         addAnnotation({
@@ -558,6 +582,22 @@ function App() {
   function endViewportPan(): void {
     setIsMiddlePanning(false);
     panStateRef.current = null;
+  }
+
+  function addCustomStamp(name: string, dataUrl: string): void {
+    const stamp: CustomStamp = {
+      id: makeId(),
+      name,
+      dataUrl,
+    };
+    setCustomStamps((prev) => [stamp, ...prev]);
+    setActiveCustomStampId(stamp.id);
+  }
+
+  function deleteActiveCustomStamp(): void {
+    if (!activeCustomStampId) return;
+    setCustomStamps((prev) => prev.filter((stamp) => stamp.id !== activeCustomStampId));
+    setActiveCustomStampId("");
   }
 
   function saveMarkupJson(): void {
@@ -1358,7 +1398,7 @@ function App() {
             <input type="text" value={stampLabel} onChange={(event) => setStampLabel(event.target.value)} />
           </label>
           <label className="uploadLabel">
-            Stamp image
+            Add custom stamp
             <input
               type="file"
               accept="image/*"
@@ -1367,14 +1407,31 @@ function App() {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = () => {
-                  setStampImageDataUrl(typeof reader.result === "string" ? reader.result : null);
+                  if (typeof reader.result !== "string") return;
+                  const trimmedName = file.name.replace(/\.[^.]+$/, "").trim();
+                  const displayName = trimmedName.length > 0 ? trimmedName : `Custom ${customStamps.length + 1}`;
+                  addCustomStamp(displayName, reader.result);
                 };
                 reader.readAsDataURL(file);
                 event.currentTarget.value = "";
               }}
             />
           </label>
-          <button type="button" onClick={() => setStampImageDataUrl(null)}>
+          <label>
+            Custom stamp
+            <select value={activeCustomStampId} onChange={(event) => setActiveCustomStampId(event.target.value)}>
+              <option value="">Text stamp mode</option>
+              {customStamps.map((stamp) => (
+                <option key={stamp.id} value={stamp.id}>
+                  {stamp.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={deleteActiveCustomStamp} disabled={!activeCustomStampId}>
+            Delete custom
+          </button>
+          <button type="button" onClick={() => setActiveCustomStampId("")}>
             Text stamp mode
           </button>
           <label>

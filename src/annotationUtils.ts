@@ -38,7 +38,8 @@ export function buildCloudPath(
   height: number,
   scallopRadius = 8,
 ): string {
-  const points: Point[] = [];
+  type CloudAnchor = Point & { nx: number; ny: number };
+  const points: CloudAnchor[] = [];
   const perimeter = 2 * (width + height);
   const step = scallopRadius * 1.5;
   const totalPoints = Math.max(8, Math.floor(perimeter / step));
@@ -46,18 +47,22 @@ export function buildCloudPath(
   for (let i = 0; i < totalPoints; i += 1) {
     const distance = (i / totalPoints) * perimeter;
     if (distance <= width) {
-      points.push({ x: x + distance, y });
+      points.push({ x: x + distance, y, nx: 0, ny: -1 });
     } else if (distance <= width + height) {
-      points.push({ x: x + width, y: y + (distance - width) });
+      points.push({ x: x + width, y: y + (distance - width), nx: 1, ny: 0 });
     } else if (distance <= 2 * width + height) {
       points.push({
         x: x + width - (distance - (width + height)),
         y: y + height,
+        nx: 0,
+        ny: 1,
       });
     } else {
       points.push({
         x,
         y: y + height - (distance - (2 * width + height)),
+        nx: -1,
+        ny: 0,
       });
     }
   }
@@ -66,13 +71,23 @@ export function buildCloudPath(
     return "";
   }
 
-  let path = `M ${points[0].x} ${points[0].y}`;
-  for (let i = 0; i < points.length; i += 1) {
-    const current = points[i];
-    const next = points[(i + 1) % points.length];
-    const cx = (current.x + next.x) / 2;
-    const cy = (current.y + next.y) / 2;
-    path += ` Q ${current.x} ${current.y}, ${cx} ${cy}`;
+  const bumpDistance = scallopRadius * 0.9;
+  const bumpPoints = points.map((point) => ({
+    x: point.x + point.nx * bumpDistance,
+    y: point.y + point.ny * bumpDistance,
+  }));
+
+  const firstMid = {
+    x: (bumpPoints[bumpPoints.length - 1].x + bumpPoints[0].x) / 2,
+    y: (bumpPoints[bumpPoints.length - 1].y + bumpPoints[0].y) / 2,
+  };
+
+  let path = `M ${firstMid.x} ${firstMid.y}`;
+  for (let i = 0; i < bumpPoints.length; i += 1) {
+    const current = bumpPoints[i];
+    const next = bumpPoints[(i + 1) % bumpPoints.length];
+    const mid = { x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 };
+    path += ` Q ${current.x} ${current.y}, ${mid.x} ${mid.y}`;
   }
   path += " Z";
   return path;

@@ -32,6 +32,11 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - STATUS A
   - STATUS B
   - STATUS C
+- Custom stamps:
+  - upload image stamps to add them to your default stamp list
+  - stored locally for reuse between sessions
+  - selectable from the custom stamp dropdown
+  - removable with delete action
 - Save markups as JSON
 - Load markups from JSON
 - Full file workflow:
