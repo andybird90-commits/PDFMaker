@@ -12,6 +12,7 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - cloud callout
   - highlighter
   - custom stamps (text stamps and uploaded image stamps)
+  - pins with status/scheduling/photo metadata
 - Select + drag existing annotations
 - Resize handles for line endpoints, rectangles, clouds, and stamps
 - Undo last annotation and clear all
@@ -39,6 +40,11 @@ PDFMaker is a browser-based PDF annotation editor built with PDF.js and React.
   - removable with delete action
 - Save markups as JSON
 - Load markups from JSON
+- Pin workflow:
+  - drop pins on any page
+  - add title, description, scheduled date, and photo attachment
+  - update pin status (Open, In progress, Scheduled, Closed)
+  - export pin report as JSON or CSV
 - Full file workflow:
   - Open (PDF, project JSON, or markup JSON)
   - Save (writes annotated flattened `.pdf`)

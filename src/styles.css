@@ -204,6 +204,14 @@ label {
   cursor: crosshair;
 }
 
+.pinPhotoPreview {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+}
+
 @media (max-width: 980px) {
   .workspaceLayout {
     grid-template-columns: 1fr;

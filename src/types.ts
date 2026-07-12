@@ -5,7 +5,8 @@ export type Tool =
   | "rect"
   | "cloud"
   | "highlighter"
-  | "stamp";
+  | "stamp"
+  | "pin";
 
 export type Point = {
   x: number;
@@ -60,12 +61,26 @@ export type StampAnnotation = BaseAnnotation & {
   opacity: number;
 };
 
+export type PinStatus = "open" | "in_progress" | "scheduled" | "closed";
+
+export type PinAnnotation = BaseAnnotation & {
+  type: "pin";
+  position: NormalizedPoint;
+  title: string;
+  description: string;
+  status: PinStatus;
+  scheduledFor: string;
+  photoDataUrl?: string;
+  createdAt: string;
+};
+
 export type Annotation =
   | LineAnnotation
   | RectAnnotation
   | CloudAnnotation
   | HighlighterAnnotation
-  | StampAnnotation;
+  | StampAnnotation
+  | PinAnnotation;
 
 export type MarkupDocument = {
   schemaVersion: 1;

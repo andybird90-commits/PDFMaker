@@ -17,6 +17,7 @@ import type {
   EditorProjectDocument,
   LineStyle,
   MarkupDocument,
+  PinStatus,
   Point,
   StampAnnotation,
   Tool,
@@ -53,6 +54,12 @@ const DEFAULT_HIGHLIGHTER_COLOR = "#ffe45e";
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 4;
 const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
+const PIN_STATUS_COLOR: Record<PinStatus, string> = {
+  open: "#dc2626",
+  in_progress: "#2563eb",
+  scheduled: "#ca8a04",
+  closed: "#16a34a",
+};
 
 const STAMP_PRESETS: Array<{ id: string; label: string; color: string }> = [
   { id: "approved", label: "APPROVED", color: "#0f766e" },
@@ -112,6 +119,17 @@ function App() {
     () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
     [annotations, selectedId],
   );
+  const pinNumberById = useMemo(() => {
+    const map = new Map<string, number>();
+    let index = 1;
+    for (const annotation of sortedAnnotations) {
+      if (annotation.type === "pin") {
+        map.set(annotation.id, index);
+        index += 1;
+      }
+    }
+    return map;
+  }, [sortedAnnotations]);
   const activeStampPreset = useMemo(
     () => STAMP_PRESETS.find((preset) => preset.id === activeStampPresetId) ?? STAMP_PRESETS[0],
     [activeStampPresetId],
@@ -142,6 +160,27 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STAMPS_STORAGE_KEY, JSON.stringify(customStamps));
   }, [customStamps]);
+
+  function statusLabel(status: PinStatus): string {
+    if (status === "in_progress") return "In progress";
+    if (status === "scheduled") return "Scheduled";
+    if (status === "closed") return "Closed";
+    return "Open";
+  }
+
+  function normalizeImportedAnnotation(annotation: Annotation): Annotation {
+    if (annotation.type === "pin") {
+      return {
+        ...annotation,
+        lineStyle: annotation.lineStyle ?? "solid",
+        color: PIN_STATUS_COLOR[annotation.status] ?? annotation.color,
+      };
+    }
+    return {
+      ...annotation,
+      lineStyle: annotation.lineStyle ?? "solid",
+    };
+  }
 
   useEffect(() => {
     if (!pdfDoc || pageCount === 0) {
@@ -260,10 +299,7 @@ function App() {
     const bytes = base64ToBytes(parsed.pdfData);
     await loadPdfBytes(bytes, parsed.fileName || "project.pdf");
     setAnnotations(
-      (parsed.annotations ?? []).map((annotation) => ({
-        ...annotation,
-        lineStyle: annotation.lineStyle ?? "solid",
-      })),
+      (parsed.annotations ?? []).map((annotation) => normalizeImportedAnnotation(annotation)),
     );
   }
 
@@ -281,10 +317,7 @@ function App() {
     }
     if (Array.isArray((parsed as MarkupDocument).annotations)) {
       setAnnotations(
-        (parsed as MarkupDocument).annotations.map((annotation) => ({
-          ...annotation,
-          lineStyle: annotation.lineStyle ?? "solid",
-        })),
+        (parsed as MarkupDocument).annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
       );
       setSelectedId(null);
       return "markups";
@@ -464,6 +497,28 @@ function App() {
       return;
     }
 
+    if (tool === "pin") {
+      const normalized = normalizePoint(point, size.width, size.height);
+      const pinId = makeId();
+      addAnnotation({
+        id: pinId,
+        type: "pin",
+        page,
+        color: PIN_STATUS_COLOR.open,
+        strokeWidth: 2,
+        lineStyle: "solid",
+        position: normalized,
+        title: `Pin ${pinNumberById.size + 1}`,
+        description: "",
+        status: "open",
+        scheduledFor: "",
+        createdAt: new Date().toISOString(),
+      });
+      setSelectedId(pinId);
+      setTool("select");
+      return;
+    }
+
     if (tool === "highlighter") {
       setDrawingState({ page, start: point, current: point, points: [point] });
       return;
@@ -539,6 +594,58 @@ function App() {
     setSelectedId(null);
   }
 
+  function exportPinsJson(): void {
+    const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
+    const payload = {
+      schemaVersion: 1,
+      fileName: pdfName,
+      exportedAt: new Date().toISOString(),
+      pins,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.json`);
+  }
+
+  function csvEscape(value: string): string {
+    if (value.includes(",") || value.includes("\"") || value.includes("\n")) {
+      return `"${value.replaceAll("\"", "\"\"")}"`;
+    }
+    return value;
+  }
+
+  function exportPinsCsv(): void {
+    const pins = sortedAnnotations.filter((annotation) => annotation.type === "pin");
+    const header = [
+      "Pin Number",
+      "Pin ID",
+      "Page",
+      "Title",
+      "Description",
+      "Status",
+      "Scheduled For",
+      "Created At",
+      "Has Photo",
+      "X",
+      "Y",
+    ];
+    const rows = pins.map((pin) => [
+      String(pinNumberById.get(pin.id) ?? ""),
+      pin.id,
+      String(pin.page),
+      pin.title,
+      pin.description,
+      statusLabel(pin.status),
+      pin.scheduledFor,
+      pin.createdAt,
+      pin.photoDataUrl ? "Yes" : "No",
+      pin.position.x.toFixed(4),
+      pin.position.y.toFixed(4),
+    ]);
+    const csv = [header, ...rows].map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    downloadBlob(blob, `${pdfName.replace(/\.pdf$/i, "")}.pins.csv`);
+  }
+
   function onViewportWheel(event: React.WheelEvent<HTMLElement>): void {
     if (!pdfDoc) return;
     event.preventDefault();
@@ -600,6 +707,18 @@ function App() {
     setActiveCustomStampId("");
   }
 
+  function applyPinStatus(status: PinStatus): void {
+    updateSelectedAnnotation((annotation) =>
+      annotation.type === "pin"
+        ? {
+            ...annotation,
+            status,
+            color: PIN_STATUS_COLOR[status],
+          }
+        : annotation,
+    );
+  }
+
   function saveMarkupJson(): void {
     const doc: MarkupDocument = {
       schemaVersion: 1,
@@ -619,10 +738,7 @@ function App() {
       throw new Error("Invalid annotation payload");
     }
     setAnnotations(
-      parsed.annotations.map((annotation) => ({
-        ...annotation,
-        lineStyle: annotation.lineStyle ?? "solid",
-      })),
+      parsed.annotations.map((annotation) => normalizeImportedAnnotation(annotation)),
     );
     setSelectedId(null);
   }
@@ -849,6 +965,34 @@ function App() {
               opacity: annotation.opacity,
             });
           }
+          continue;
+        }
+
+        if (annotation.type === "pin") {
+          const center = toPdfPoint(annotation.position, width, height);
+          const pinNumber = pinNumberById.get(annotation.id) ?? 0;
+          const pinColor = toPdfColor(PIN_STATUS_COLOR[annotation.status] ?? annotation.color);
+          page.drawCircle({
+            x: center.x,
+            y: center.y + 9,
+            size: 9,
+            borderColor: rgb(0.08, 0.08, 0.08),
+            borderWidth: 1.2,
+            color: pinColor,
+          });
+          page.drawSvgPath("M0,0 L6,0 L3,-9 Z", {
+            x: center.x - 3,
+            y: center.y + 2,
+            borderColor: rgb(0.08, 0.08, 0.08),
+            borderWidth: 1.2,
+            color: pinColor,
+          });
+          page.drawText(String(pinNumber), {
+            x: center.x - 3,
+            y: center.y + 7,
+            size: 7,
+            color: rgb(1, 1, 1),
+          });
         }
       }
     }
@@ -949,6 +1093,13 @@ function App() {
             }
             if (annotation.type === "stamp") {
               if (initial.type !== "stamp") return annotation;
+              return {
+                ...annotation,
+                position: movePoint(initial.position, dx, dy),
+              };
+            }
+            if (annotation.type === "pin") {
+              if (initial.type !== "pin") return annotation;
               return {
                 ...annotation,
                 position: movePoint(initial.position, dx, dy),
@@ -1112,6 +1263,41 @@ function App() {
             fill={annotation.color}
           >
             {annotation.label ?? "STAMP"}
+          </text>
+        </g>
+      );
+    }
+
+    if (annotation.type === "pin") {
+      const position = denormalizePoint(annotation.position, size.width, size.height);
+      const pinNumber = pinNumberById.get(annotation.id) ?? 0;
+      const pinColor = PIN_STATUS_COLOR[annotation.status] ?? annotation.color;
+      return (
+        <g key={annotation.id} onClick={commonProps.onClick} onPointerDown={commonProps.onPointerDown} style={commonProps.style}>
+          <circle
+            cx={position.x}
+            cy={position.y - 11}
+            r={11}
+            fill={pinColor}
+            stroke={selected ? "#ffffff" : "#111827"}
+            strokeWidth={selected ? 2.5 : 1.5}
+          />
+          <polygon
+            points={`${position.x - 6},${position.y - 3} ${position.x + 6},${position.y - 3} ${position.x},${position.y + 10}`}
+            fill={pinColor}
+            stroke={selected ? "#ffffff" : "#111827"}
+            strokeWidth={selected ? 2.5 : 1.5}
+          />
+          <text
+            x={position.x}
+            y={position.y - 11}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={10}
+            fontWeight={700}
+            fill="#ffffff"
+          >
+            {pinNumber}
           </text>
         </g>
       );
@@ -1294,6 +1480,20 @@ function App() {
           <button type="button" onClick={saveMarkupJson} disabled={annotations.length === 0}>
             Save Markups
           </button>
+          <button
+            type="button"
+            onClick={exportPinsJson}
+            disabled={!annotations.some((annotation) => annotation.type === "pin")}
+          >
+            Export Pins JSON
+          </button>
+          <button
+            type="button"
+            onClick={exportPinsCsv}
+            disabled={!annotations.some((annotation) => annotation.type === "pin")}
+          >
+            Export Pins CSV
+          </button>
           <button type="button" onClick={() => void exportAnnotatedPngs()} disabled={!pdfDoc}>
             Export PNG
           </button>
@@ -1303,7 +1503,7 @@ function App() {
         </div>
 
         <div className="group">
-          {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp"] as Tool[]).map((name) => (
+          {(["select", "line", "arrow", "rect", "cloud", "highlighter", "stamp", "pin"] as Tool[]).map((name) => (
             <button
               key={name}
               type="button"
@@ -1462,66 +1662,159 @@ function App() {
         {selectedAnnotation ? (
           <div className="group">
             <strong>Selected</strong>
-            <label>
-              Color
-              <input
-                type="color"
-                value={selectedAnnotation.color}
-                onChange={(event) =>
-                  updateSelectedAnnotation((annotation) => ({ ...annotation, color: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Weight
-              <input
-                type="range"
-                min={1}
-                max={24}
-                value={selectedAnnotation.strokeWidth}
-                onChange={(event) =>
-                  updateSelectedAnnotation((annotation) => ({
-                    ...annotation,
-                    strokeWidth: Number(event.target.value),
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Type
-              <select
-                value={selectedAnnotation.lineStyle ?? "solid"}
-                onChange={(event) =>
-                  updateSelectedAnnotation((annotation) => ({
-                    ...annotation,
-                    lineStyle: event.target.value as LineStyle,
-                  }))
-                }
-              >
-                <option value="solid">Solid</option>
-                <option value="dashed">Dashed</option>
-                <option value="dotted">Dotted</option>
-              </select>
-            </label>
-            {selectedAnnotation.type === "highlighter" ? (
-              <label>
-                Opacity
-                <input
-                  type="range"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  value={selectedAnnotation.opacity}
-                  onChange={(event) =>
+            {selectedAnnotation.type !== "pin" ? (
+              <>
+                <label>
+                  Color
+                  <input
+                    type="color"
+                    value={selectedAnnotation.color}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) => ({ ...annotation, color: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Weight
+                  <input
+                    type="range"
+                    min={1}
+                    max={24}
+                    value={selectedAnnotation.strokeWidth}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) => ({
+                        ...annotation,
+                        strokeWidth: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Type
+                  <select
+                    value={selectedAnnotation.lineStyle ?? "solid"}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) => ({
+                        ...annotation,
+                        lineStyle: event.target.value as LineStyle,
+                      }))
+                    }
+                  >
+                    <option value="solid">Solid</option>
+                    <option value="dashed">Dashed</option>
+                    <option value="dotted">Dotted</option>
+                  </select>
+                </label>
+                {selectedAnnotation.type === "highlighter" ? (
+                  <label>
+                    Opacity
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={selectedAnnotation.opacity}
+                      onChange={(event) =>
+                        updateSelectedAnnotation((annotation) =>
+                          annotation.type === "highlighter"
+                            ? { ...annotation, opacity: Number(event.target.value) }
+                            : annotation,
+                        )
+                      }
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <span>Pin #{pinNumberById.get(selectedAnnotation.id) ?? "-"}</span>
+                <label>
+                  Title
+                  <input
+                    type="text"
+                    value={selectedAnnotation.title}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) =>
+                        annotation.type === "pin" ? { ...annotation, title: event.target.value } : annotation,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Description
+                  <input
+                    type="text"
+                    value={selectedAnnotation.description}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) =>
+                        annotation.type === "pin"
+                          ? { ...annotation, description: event.target.value }
+                          : annotation,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Status
+                  <select value={selectedAnnotation.status} onChange={(event) => applyPinStatus(event.target.value as PinStatus)}>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </label>
+                <label>
+                  Scheduled
+                  <input
+                    type="date"
+                    value={selectedAnnotation.scheduledFor}
+                    onChange={(event) =>
+                      updateSelectedAnnotation((annotation) =>
+                        annotation.type === "pin"
+                          ? { ...annotation, scheduledFor: event.target.value }
+                          : annotation,
+                      )
+                    }
+                  />
+                </label>
+                <label className="uploadLabel">
+                  Pin photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const result = reader.result;
+                        if (typeof result !== "string") return;
+                        updateSelectedAnnotation((annotation) =>
+                          annotation.type === "pin"
+                            ? { ...annotation, photoDataUrl: result }
+                            : annotation,
+                        );
+                      };
+                      reader.readAsDataURL(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
                     updateSelectedAnnotation((annotation) =>
-                      annotation.type === "highlighter"
-                        ? { ...annotation, opacity: Number(event.target.value) }
-                        : annotation,
+                      annotation.type === "pin" ? { ...annotation, photoDataUrl: undefined } : annotation,
                     )
                   }
-                />
-              </label>
-            ) : null}
+                >
+                  Remove photo
+                </button>
+                {selectedAnnotation.photoDataUrl ? (
+                  <img src={selectedAnnotation.photoDataUrl} alt="Pin attachment" className="pinPhotoPreview" />
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
       </header>
