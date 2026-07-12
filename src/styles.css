@@ -991,6 +991,18 @@ label {
   min-height: 420px;
 }
 
+.opsOpenFileView {
+  min-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.opsOpenFileEditorWrap {
+  flex: 1;
+  min-height: 70vh;
+}
+
 .opsPreviewImage {
   width: 100%;
   border: 1px solid #2f4866;

@@ -137,7 +137,7 @@ type OpsRoute =
   | { name: "sign-in" }
   | { name: "sign-out" }
   | { name: "timesheets"; date?: string }
-  | { name: "projects"; projectId?: string; section?: "files" }
+  | { name: "projects"; projectId?: string; section?: "files" | "file-open"; fileId?: string }
   | { name: "forms"; formId?: string; submissionId?: string; mode?: "fill" | "view" | "export" };
 type BatchDocument = {
   id: string;
@@ -268,6 +268,7 @@ function isOpsPath(pathname: string): boolean {
     pathname === "/projects" ||
     /^\/projects\/[^/]+$/.test(pathname) ||
     /^\/projects\/[^/]+\/files$/.test(pathname) ||
+    /^\/projects\/[^/]+\/files\/[^/]+$/.test(pathname) ||
     pathname === "/forms" ||
     /^\/forms\/[^/]+\/fill$/.test(pathname) ||
     /^\/forms\/submissions\/[^/]+$/.test(pathname) ||
@@ -283,6 +284,10 @@ function parseOpsRoute(pathname: string): OpsRoute {
   if (/^\/projects\/[^/]+\/files$/.test(pathname)) {
     const parts = pathname.split("/");
     return { name: "projects", projectId: parts[2], section: "files" };
+  }
+  if (/^\/projects\/[^/]+\/files\/[^/]+$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "file-open", fileId: decodeURIComponent(parts[4]) };
   }
   if (/^\/projects\/[^/]+$/.test(pathname)) return { name: "projects", projectId: pathname.split("/")[2] };
   if (pathname === "/forms") return { name: "forms" };
@@ -383,6 +388,7 @@ function App() {
   const [projectPreviewUrl, setProjectPreviewUrl] = useState<string>("");
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
   const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
+  const [openFileNeedsSaveWarning, setOpenFileNeedsSaveWarning] = useState<boolean>(false);
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -644,6 +650,15 @@ function App() {
     } else {
       setProjectWorkspaceTab("files");
     }
+  }, [opsRoute]);
+
+  useEffect(() => {
+    if (opsRoute.name === "projects" && opsRoute.section === "file-open" && opsRoute.fileId) {
+      setSelectedProjectFileId(opsRoute.fileId);
+      setOpenFileNeedsSaveWarning(true);
+      return;
+    }
+    setOpenFileNeedsSaveWarning(false);
   }, [opsRoute]);
 
   useEffect(() => {
@@ -2356,6 +2371,7 @@ function App() {
           : item,
       ),
     );
+    setOpenFileNeedsSaveWarning(false);
     logProjectActivity("markup saved", file.name, selectedProjectId);
     notify(`Saved markup to ${file.name} (v${currentVersion + 1}).`);
   }
@@ -2447,6 +2463,14 @@ function App() {
     setOpsPathname(path);
     setProjectEditorContext(null);
     setActiveModule("operations");
+  }
+
+  function leaveOpenFileView(projectSlug: string): void {
+    if (openFileNeedsSaveWarning) {
+      const confirmed = window.confirm("If you go back now, unsaved changes may be lost. Continue?");
+      if (!confirmed) return;
+    }
+    navigateOps(`/projects/${projectSlug}/files`);
   }
 
   function exitProjectMarkupStudio(): void {
@@ -3916,7 +3940,50 @@ function App() {
           : "Project document-management workspace";
 
         let workspaceContent: ReactElement = <div />;
-        if (projectWorkspaceTab === "files") {
+        if (route.section === "file-open" && route.fileId) {
+          const openFile = projectFiles.find((file) => file.id === route.fileId) ?? null;
+          workspaceContent = (
+            <section className="opsPanel opsOpenFileView">
+              <div className="opsInline">
+                <button type="button" onClick={() => leaveOpenFileView(workspaceProject?.slug ?? "project")}>
+                  Back to Files
+                </button>
+                <strong>{openFile?.name ?? "File"}</strong>
+                <span className="opsSubtle">
+                  {openFileNeedsSaveWarning ? "Unsaved changes warning is active." : "Changes saved."}
+                </span>
+              </div>
+              {openFile ? (
+                openFile.mimeType?.includes("pdf") || openFile.name.toLowerCase().endsWith(".pdf") ? (
+                  projectPreviewUrl ? (
+                    <div className="opsOpenFileEditorWrap">
+                      <PdfEditor
+                        url={projectPreviewUrl}
+                        initialAnnotations={openFile.annotations}
+                        readOnly={!projectPermission.usePdfMarkup}
+                        onSave={(result) => saveProjectFileMarkup(openFile.id, result)}
+                        onClose={() => leaveOpenFileView(workspaceProject?.slug ?? "project")}
+                      />
+                    </div>
+                  ) : (
+                    <p>No PDF preview URL available for this file.</p>
+                  )
+                ) : openFile.mimeType?.startsWith("image/") && openFile.dataUrl ? (
+                  <img src={openFile.dataUrl} alt={openFile.name} className="opsPreviewImage" />
+                ) : (
+                  <div className="opsFileDetails">
+                    <p>Preview is not supported for this file type.</p>
+                    <button type="button" onClick={() => downloadProjectFile(openFile)}>
+                      Download
+                    </button>
+                  </div>
+                )
+              ) : (
+                <p>File not found.</p>
+              )}
+            </section>
+          );
+        } else if (projectWorkspaceTab === "files") {
           workspaceContent = (
             <div className="opsWorkspace3Col">
               <aside className="opsPanel opsWorkspacePanel">
@@ -3986,7 +4053,10 @@ function App() {
                         <small>{file.uploadedBy ?? CURRENT_USER.name}</small>
                       </button>
                       <div className="opsInline opsFileRowActions">
-                        <button type="button" onClick={() => setSelectedProjectFileId(file.id)}>
+                        <button
+                          type="button"
+                          onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? "project"}/files/${encodeURIComponent(file.id)}`)}
+                        >
                           Open
                         </button>
                         <button type="button" onClick={() => downloadProjectFile(file)}>
