@@ -13,6 +13,7 @@ import {
   rectFromPoints,
 } from "./annotationUtils";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
+import { PdfEditor } from "./components/pdf-editor";
 import type {
   Annotation,
   EditorProjectDocument,
@@ -63,10 +64,54 @@ type Project = {
   slug: string;
   name: string;
   code: string;
+  client: string;
+  manager: string;
   status: "active" | "on_hold" | "completed" | "archived";
   address: string;
+  startDate: string;
+  targetDate: string;
+  description: string;
 };
-type FolderNode = { id: string; name: string; parentId: string | null };
+type ProjectPermission = {
+  viewFiles: boolean;
+  uploadFiles: boolean;
+  editFiles: boolean;
+  deleteFiles: boolean;
+  usePdfMarkup: boolean;
+  manageFolders: boolean;
+  manageTeam: boolean;
+  editProjectSettings: boolean;
+};
+type ProjectMember = {
+  id: string;
+  projectId: string;
+  name: string;
+  email: string;
+  role: "Owner" | "Manager" | "Engineer" | "Viewer";
+  status: "active" | "invited";
+  dateAdded: string;
+  permission: ProjectPermission;
+};
+type ProjectActivity = {
+  id: string;
+  projectId: string;
+  user: string;
+  action: string;
+  item: string;
+  at: string;
+};
+type ProjectFileVersion = {
+  id: string;
+  fileId: string;
+  projectId: string;
+  version: number;
+  dataUrl?: string;
+  fileSize?: number;
+  uploadedBy: string;
+  uploadedAt: string;
+  changeNote?: string;
+};
+type FolderNode = { id: string; projectId: string; name: string; parentId: string | null };
 type ProjectFile = {
   id: string;
   projectId: string | null;
@@ -78,6 +123,7 @@ type ProjectFile = {
   dataUrl?: string;
   uploadedBy?: string;
   version?: number;
+  annotations?: unknown;
 };
 type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
 type GpsSnapshot = {
@@ -136,18 +182,52 @@ const DEFAULT_PROJECTS: Project[] = [
     slug: "new-street-square",
     name: "New Street Square",
     code: "NSS",
+    client: "Example Developments Ltd",
+    manager: "Andy Bird",
     status: "active",
     address: "London EC4A 3BZ",
+    startDate: "2025-03-12",
+    targetDate: "2026-11-30",
+    description: "City-centre mixed-use development.",
   },
   {
     id: "proj-2",
     slug: "one-crown-place",
     name: "One Crown Place",
     code: "OCP",
+    client: "Urban Estates",
+    manager: "Sarah Johnson",
     status: "active",
     address: "London EC2A 4AQ",
+    startDate: "2025-01-20",
+    targetDate: "2026-07-15",
+    description: "Commercial fit-out and services package.",
   },
 ];
+const DEFAULT_PROJECT_FOLDERS = [
+  "01_Design Drawings",
+  "02_Specifications",
+  "03_Reports",
+  "04_Correspondence",
+  "05_Site Photos",
+  "06_Forms",
+  "07_Contracts",
+  "08_Models",
+];
+const OWNER_PERMISSION: ProjectPermission = {
+  viewFiles: true,
+  uploadFiles: true,
+  editFiles: true,
+  deleteFiles: true,
+  usePdfMarkup: true,
+  manageFolders: true,
+  manageTeam: true,
+  editProjectSettings: true,
+};
+const CURRENT_USER = {
+  name: "Andy Bird",
+  email: "andy@example.com",
+};
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -258,7 +338,22 @@ function App() {
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>(DEFAULT_PROJECTS);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(DEFAULT_PROJECTS[0]?.id ?? "");
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [projectActivities, setProjectActivities] = useState<ProjectActivity[]>([]);
+  const [projectFileVersions, setProjectFileVersions] = useState<ProjectFileVersion[]>([]);
   const [newProjectName, setNewProjectName] = useState<string>("");
+  const [newProjectCode, setNewProjectCode] = useState<string>("");
+  const [newProjectClient, setNewProjectClient] = useState<string>("");
+  const [newProjectAddress, setNewProjectAddress] = useState<string>("");
+  const [newProjectStart, setNewProjectStart] = useState<string>("");
+  const [newProjectTarget, setNewProjectTarget] = useState<string>("");
+  const [newProjectManager, setNewProjectManager] = useState<string>("Andy Bird");
+  const [newProjectDescription, setNewProjectDescription] = useState<string>("");
+  const [newProjectStatus, setNewProjectStatus] = useState<Project["status"]>("active");
+  const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
+  const [projectSearch, setProjectSearch] = useState<string>("");
+  const [projectStatusFilter, setProjectStatusFilter] = useState<Project["status"] | "all">("all");
+  const [projectWorkspaceTab, setProjectWorkspaceTab] = useState<"overview" | "files" | "team" | "forms" | "activity" | "settings">("files");
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [newWorkerName, setNewWorkerName] = useState<string>("");
@@ -278,6 +373,10 @@ function App() {
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
   const [selectedProjectFileId, setSelectedProjectFileId] = useState<string | null>(null);
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Record<string, boolean>>({});
+  const [versionHistoryFileId, setVersionHistoryFileId] = useState<string | null>(null);
+  const [projectPreviewUrl, setProjectPreviewUrl] = useState<string>("");
+  const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -346,6 +445,32 @@ function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
+  const selectedProjectMembers = useMemo(
+    () => projectMembers.filter((member) => member.projectId === selectedProjectId),
+    [projectMembers, selectedProjectId],
+  );
+  const currentProjectMember = useMemo(
+    () =>
+      selectedProjectMembers.find((member) => member.email.toLowerCase() === CURRENT_USER.email.toLowerCase()) ??
+      selectedProjectMembers.find((member) => member.role === "Owner") ??
+      null,
+    [selectedProjectMembers],
+  );
+  const projectPermission = currentProjectMember?.permission ?? OWNER_PERMISSION;
+  const filteredProjects = useMemo(
+    () =>
+      projects.filter((project) => {
+        if (projectStatusFilter !== "all" && project.status !== projectStatusFilter) return false;
+        if (!projectSearch.trim()) return true;
+        const q = projectSearch.toLowerCase();
+        return (
+          project.name.toLowerCase().includes(q) ||
+          project.code.toLowerCase().includes(q) ||
+          project.address.toLowerCase().includes(q)
+        );
+      }),
+    [projects, projectSearch, projectStatusFilter],
+  );
   const latestEntryByWorker = useMemo(() => {
     const map: Record<string, TimeEntry> = {};
     for (const entry of timeEntries) {
@@ -370,6 +495,17 @@ function App() {
   const selectedProjectFile = useMemo(
     () => projectFiles.find((file) => file.id === selectedProjectFileId) ?? null,
     [projectFiles, selectedProjectFileId],
+  );
+  const selectedProjectActivity = useMemo(
+    () =>
+      projectActivities
+        .filter((entry) => entry.projectId === selectedProjectId)
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+    [projectActivities, selectedProjectId],
+  );
+  const selectedFileVersions = useMemo(
+    () => projectFileVersions.filter((version) => version.fileId === (versionHistoryFileId ?? selectedProjectFileId)),
+    [projectFileVersions, selectedProjectFileId, versionHistoryFileId],
   );
   const opsRoute = useMemo(() => parseOpsRoute(opsPathname), [opsPathname]);
   const timeSummary = useMemo(() => {
@@ -422,6 +558,38 @@ function App() {
 
   useEffect(() => {
     if (projects.length === 0) return;
+    if (folders.length === 0) {
+      const seededFolders: FolderNode[] = [];
+      for (const project of projects) {
+        for (const folderName of DEFAULT_PROJECT_FOLDERS) {
+          seededFolders.push({
+            id: makeId(),
+            projectId: project.id,
+            name: folderName,
+            parentId: null,
+          });
+        }
+      }
+      setFolders(seededFolders);
+    }
+    if (projectMembers.length === 0) {
+      setProjectMembers(
+        projects.map((project) => ({
+          id: makeId(),
+          projectId: project.id,
+          name: project.manager || CURRENT_USER.name,
+          email: CURRENT_USER.email,
+          role: "Owner",
+          status: "active",
+          dateAdded: new Date().toISOString(),
+          permission: OWNER_PERMISSION,
+        })),
+      );
+    }
+  }, [projects, folders.length, projectMembers.length]);
+
+  useEffect(() => {
+    if (projects.length === 0) return;
     const exists = projects.some((project) => project.id === selectedProjectId);
     if (!exists) {
       setSelectedProjectId(projects[0].id);
@@ -461,6 +629,27 @@ function App() {
     if (opsRoute.name !== "sign-in" && opsRoute.name !== "sign-out") return;
     void refreshLiveGps();
   }, [activeModule, opsRoute.name]);
+
+  useEffect(() => {
+    if (opsRoute.name !== "projects" || !opsRoute.projectId) return;
+    if (opsRoute.section === "files") {
+      setProjectWorkspaceTab("files");
+    } else {
+      setProjectWorkspaceTab("files");
+    }
+  }, [opsRoute]);
+
+  useEffect(() => {
+    if (!selectedProjectFile?.dataUrl) {
+      setProjectPreviewUrl("");
+      return;
+    }
+    const bytes = dataUrlToBytes(selectedProjectFile.dataUrl);
+    const blob = new Blob([toArrayBuffer(bytes)], { type: selectedProjectFile.mimeType ?? "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    setProjectPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedProjectFile?.id, selectedProjectFile?.dataUrl, selectedProjectFile?.mimeType]);
 
   useEffect(() => {
     setStampLabel(activeStampPreset.label);
@@ -516,12 +705,13 @@ function App() {
           }));
           const loadedFolders = (foldersRes.data ?? []).map((row) => ({
             id: row.id,
+            projectId: selectedProjectId || DEFAULT_PROJECTS[0].id,
             name: row.name,
             parentId: row.parent_id,
           }));
           const loadedFiles = (filesRes.data ?? []).map((row) => ({
             id: row.id,
-            projectId: selectedProjectId || null,
+            projectId: selectedProjectId || DEFAULT_PROJECTS[0].id,
             folderId: row.folder_id,
             name: row.name,
             status: row.status,
@@ -548,18 +738,31 @@ function App() {
         const parsed = JSON.parse(raw) as {
           workers?: Worker[];
           timeEntries?: TimeEntry[];
+          projects?: Project[];
+          projectMembers?: ProjectMember[];
+          projectActivities?: ProjectActivity[];
+          projectFileVersions?: ProjectFileVersion[];
           folders?: FolderNode[];
           projectFiles?: ProjectFile[];
         };
         setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
         setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
-        const loadedFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
+        setProjects(Array.isArray(parsed.projects) && parsed.projects.length > 0 ? parsed.projects : DEFAULT_PROJECTS);
+        setProjectMembers(Array.isArray(parsed.projectMembers) ? parsed.projectMembers : []);
+        setProjectActivities(Array.isArray(parsed.projectActivities) ? parsed.projectActivities : []);
+        setProjectFileVersions(Array.isArray(parsed.projectFileVersions) ? parsed.projectFileVersions : []);
+        const loadedFolders = Array.isArray(parsed.folders)
+          ? parsed.folders.map((folder) => ({
+              ...folder,
+              projectId: (folder as FolderNode).projectId ?? selectedProjectId ?? DEFAULT_PROJECTS[0].id,
+            }))
+          : [];
         setFolders(loadedFolders);
         setProjectFiles(
           Array.isArray(parsed.projectFiles)
             ? parsed.projectFiles.map((file) => ({
                 ...file,
-                projectId: (file as ProjectFile).projectId ?? selectedProjectId ?? null,
+                projectId: (file as ProjectFile).projectId ?? selectedProjectId ?? DEFAULT_PROJECTS[0].id,
                 version: (file as ProjectFile).version ?? 1,
                 uploadedBy: (file as ProjectFile).uploadedBy ?? "Current User",
               }))
@@ -583,11 +786,15 @@ function App() {
       JSON.stringify({
         workers,
         timeEntries,
+        projects,
+        projectMembers,
+        projectActivities,
+        projectFileVersions,
         folders,
         projectFiles,
       }),
     );
-  }, [workers, timeEntries, folders, projectFiles]);
+  }, [workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1562,6 +1769,10 @@ function App() {
   }
 
   async function addFolder(): Promise<void> {
+    if (!projectPermission.manageFolders) {
+      notify("You do not have permission to manage folders.");
+      return;
+    }
     const name = newFolderName.trim();
     if (!name) {
       notify("Enter folder name.");
@@ -1572,12 +1783,13 @@ function App() {
       try {
         const { data, error } = await supabase
           .from("folders")
-          .insert({ name, parent_id: null })
+          .insert({ name, parent_id: selectedFolderId })
           .select("id,name,parent_id")
           .single();
         if (error) throw error;
         const folder: FolderNode = {
           id: data.id,
+          projectId: selectedProjectId,
           name: data.name,
           parentId: data.parent_id,
         };
@@ -1595,14 +1807,85 @@ function App() {
     }
     const folder: FolderNode = {
       id: makeId(),
+      projectId: selectedProjectId,
       name,
-      parentId: null,
+      parentId: selectedFolderId,
     };
     setFolders((prev) => [folder, ...prev]);
     setNewFolderName("");
     if (!selectedFolderId) {
       setSelectedFolderId(folder.id);
     }
+    logProjectActivity("folder created", folder.name, selectedProjectId);
+  }
+
+  function toggleFolderExpanded(folderId: string): void {
+    setExpandedFolderIds((prev) => ({ ...prev, [folderId]: !prev[folderId] }));
+  }
+
+  function renameFolder(folderId: string): void {
+    if (!projectPermission.manageFolders) {
+      notify("You do not have permission to rename folders.");
+      return;
+    }
+    const target = folders.find((folder) => folder.id === folderId);
+    if (!target) return;
+    const nextName = window.prompt("Rename folder", target.name)?.trim();
+    if (!nextName) return;
+    setFolders((prev) => prev.map((folder) => (folder.id === folderId ? { ...folder, name: nextName } : folder)));
+    logProjectActivity("folder renamed", `${target.name} -> ${nextName}`, selectedProjectId);
+  }
+
+  function deleteFolder(folderId: string): void {
+    if (!projectPermission.manageFolders) {
+      notify("You do not have permission to delete folders.");
+      return;
+    }
+    const target = folders.find((folder) => folder.id === folderId);
+    if (!target) return;
+    if (!window.confirm(`Delete folder "${target.name}"?`)) return;
+    const descendantIds = new Set<string>();
+    const queue = [folderId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      descendantIds.add(current);
+      for (const child of folders) {
+        if (child.parentId === current) {
+          queue.push(child.id);
+        }
+      }
+    }
+    setFolders((prev) => prev.filter((folder) => !descendantIds.has(folder.id)));
+    setProjectFiles((prev) => prev.filter((file) => !file.folderId || !descendantIds.has(file.folderId)));
+    if (selectedFolderId && descendantIds.has(selectedFolderId)) {
+      setSelectedFolderId(null);
+    }
+    logProjectActivity("folder deleted", target.name, selectedProjectId);
+  }
+
+  function moveFolder(folderId: string): void {
+    if (!projectPermission.manageFolders) {
+      notify("You do not have permission to move folders.");
+      return;
+    }
+    const target = folders.find((folder) => folder.id === folderId);
+    if (!target) return;
+    const destinationName = window.prompt("Move folder to parent folder name (leave blank for root):", "");
+    if (destinationName === null) return;
+    if (!destinationName.trim()) {
+      setFolders((prev) => prev.map((folder) => (folder.id === folderId ? { ...folder, parentId: null } : folder)));
+      logProjectActivity("folder moved", `${target.name} -> Root`, selectedProjectId);
+      return;
+    }
+    const destination = folders.find(
+      (folder) => folder.projectId === selectedProjectId && folder.name.toLowerCase() === destinationName.trim().toLowerCase(),
+    );
+    if (!destination) {
+      notify("Destination folder not found.");
+      return;
+    }
+    setFolders((prev) => prev.map((folder) => (folder.id === folderId ? { ...folder, parentId: destination.id } : folder)));
+    logProjectActivity("folder moved", `${target.name} -> ${destination.name}`, selectedProjectId);
   }
 
   function toProjectSlug(name: string): string {
@@ -1613,7 +1896,34 @@ function App() {
       .replace(/^-+|-+$/g, "");
   }
 
-  function addProject(): void {
+  function logProjectActivity(action: string, item: string, projectId: string): void {
+    const entry: ProjectActivity = {
+      id: makeId(),
+      projectId,
+      user: CURRENT_USER.name,
+      action,
+      item,
+      at: new Date().toISOString(),
+    };
+    setProjectActivities((prev) => [entry, ...prev]);
+  }
+
+  async function createDefaultProjectFolders(projectId: string): Promise<void> {
+    const records = DEFAULT_PROJECT_FOLDERS.map((name) => ({
+      id: makeId(),
+      projectId,
+      name,
+      parentId: null as string | null,
+    }));
+    setFolders((prev) => [...records, ...prev]);
+    if (hasSupabaseConfig && supabase) {
+      for (const folder of records) {
+        await supabase.from("folders").insert({ name: folder.name, parent_id: null });
+      }
+    }
+  }
+
+  async function addProject(): Promise<void> {
     const name = newProjectName.trim();
     if (!name) {
       notify("Enter project name.");
@@ -1630,14 +1940,43 @@ function App() {
       id: makeId(),
       slug,
       name,
-      code: slug.slice(0, 3).toUpperCase(),
-      status: "active",
-      address: opsLocationName,
+      code: newProjectCode.trim() || slug.slice(0, 3).toUpperCase(),
+      client: newProjectClient.trim() || "Client",
+      manager: newProjectManager.trim() || CURRENT_USER.name,
+      status: newProjectStatus,
+      address: newProjectAddress.trim() || opsLocationName,
+      startDate: newProjectStart || new Date().toISOString().slice(0, 10),
+      targetDate: newProjectTarget || "",
+      description: newProjectDescription.trim(),
     };
     setProjects((prev) => [project, ...prev]);
+    setProjectMembers((prev) => [
+      {
+        id: makeId(),
+        projectId: project.id,
+        name: newProjectManager.trim() || CURRENT_USER.name,
+        email: CURRENT_USER.email,
+        role: "Owner",
+        status: "active",
+        dateAdded: new Date().toISOString(),
+        permission: OWNER_PERMISSION,
+      },
+      ...prev,
+    ]);
+    await createDefaultProjectFolders(project.id);
     setSelectedProjectId(project.id);
     setNewProjectName("");
-    navigateOps(`/projects/${project.slug}`);
+    setNewProjectCode("");
+    setNewProjectClient("");
+    setNewProjectAddress("");
+    setNewProjectStart("");
+    setNewProjectTarget("");
+    setNewProjectManager(CURRENT_USER.name);
+    setNewProjectDescription("");
+    setNewProjectStatus("active");
+    setShowNewProjectModal(false);
+    logProjectActivity("project created", project.name, project.id);
+    navigateOps(`/projects/${project.slug}/files`);
     notify(`Created project ${project.name}.`);
   }
 
@@ -1657,13 +1996,61 @@ function App() {
   }
 
   async function addProjectFile(
-    override?: { name: string; mimeType?: string; dataUrl?: string; uploadedBy?: string },
+    override?: {
+      name: string;
+      mimeType?: string;
+      dataUrl?: string;
+      uploadedBy?: string;
+      fileSize?: number;
+      replaceFileId?: string;
+      changeNote?: string;
+    },
   ): Promise<void> {
+    if (!projectPermission.uploadFiles) {
+      notify("You do not have permission to upload files.");
+      return;
+    }
     const name = (override?.name ?? newFileName).trim();
     if (!name) {
       notify("Enter file name.");
       return;
     }
+    const replaceTarget = override?.replaceFileId ? projectFiles.find((file) => file.id === override.replaceFileId) : null;
+    if (replaceTarget) {
+      const currentVersion = replaceTarget.version ?? 1;
+      const versionEntry: ProjectFileVersion = {
+        id: makeId(),
+        fileId: replaceTarget.id,
+        projectId: selectedProjectId,
+        version: currentVersion,
+        dataUrl: replaceTarget.dataUrl,
+        fileSize: override?.fileSize,
+        uploadedBy: replaceTarget.uploadedBy ?? CURRENT_USER.name,
+        uploadedAt: replaceTarget.updatedAt,
+        changeNote: override?.changeNote ?? "Superseded by new version",
+      };
+      setProjectFileVersions((prev) => [versionEntry, ...prev]);
+      setProjectFiles((prev) =>
+        prev.map((file) =>
+          file.id === replaceTarget.id
+            ? {
+                ...file,
+                name,
+                mimeType: override?.mimeType ?? file.mimeType,
+                dataUrl: override?.dataUrl ?? file.dataUrl,
+                updatedAt: new Date().toISOString(),
+                uploadedBy: override?.uploadedBy ?? CURRENT_USER.name,
+                version: currentVersion + 1,
+                status: "Current",
+              }
+            : file,
+        ),
+      );
+      logProjectActivity("new version uploaded", name, selectedProjectId);
+      notify(`Uploaded v${currentVersion + 1} for ${name}.`);
+      return;
+    }
+
     if (hasSupabaseConfig && supabase) {
       setOpsLoading(true);
       try {
@@ -1693,6 +2080,7 @@ function App() {
         };
         setProjectFiles((prev) => [file, ...prev]);
         setNewFileName("");
+        logProjectActivity("file uploaded", file.name, selectedProjectId);
         notify(`Added file ${file.name}.`);
       } catch (error) {
         notify(`Add file failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1715,31 +2103,128 @@ function App() {
     };
     setProjectFiles((prev) => [file, ...prev]);
     setNewFileName("");
+    logProjectActivity("file uploaded", file.name, selectedProjectId);
     notify(`Added file ${file.name}.`);
   }
 
-  async function handleProjectFileUpload(file: File | null): Promise<void> {
-    if (!file) return;
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      await addProjectFile({
-        name: file.name,
-        mimeType: file.type || "application/octet-stream",
-        dataUrl,
-        uploadedBy: "Current User",
-      });
-    } catch (error) {
-      notify(`Upload failed: ${getErrorMessage(error)}`);
+  async function handleProjectFileUpload(files: FileList | File[] | null, targetFileId?: string): Promise<void> {
+    if (!files || files.length === 0) return;
+    const queue = Array.from(files);
+    for (const file of queue) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        const existing =
+          (targetFileId ? projectFiles.find((fileItem) => fileItem.id === targetFileId) : null) ??
+          projectFiles.find(
+          (projectFile) =>
+            projectFile.projectId === selectedProjectId &&
+            projectFile.folderId === selectedFolderId &&
+            projectFile.name.toLowerCase() === file.name.toLowerCase(),
+        );
+        if (existing) {
+          const mode = window.prompt(
+            `A file named "${file.name}" already exists.\nType "version" to upload a new version, "keep" to keep both, or "cancel".`,
+            "version",
+          );
+          if (mode === null || mode.toLowerCase() === "cancel") {
+            continue;
+          }
+          if (mode.toLowerCase() === "version") {
+            await addProjectFile({
+              name: file.name,
+              mimeType: file.type || "application/octet-stream",
+              dataUrl,
+              uploadedBy: CURRENT_USER.name,
+              fileSize: file.size,
+              replaceFileId: existing.id,
+              changeNote: "Uploaded from files workspace",
+            });
+            continue;
+          }
+          if (mode.toLowerCase() !== "keep") {
+            notify(`Skipped ${file.name}.`);
+            continue;
+          }
+        }
+        await addProjectFile({
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          dataUrl,
+          uploadedBy: CURRENT_USER.name,
+          fileSize: file.size,
+        });
+      } catch (error) {
+        notify(`Upload failed: ${getErrorMessage(error)}`);
+      }
     }
+    setVersionUploadTargetId(null);
   }
 
   function deleteProjectFile(fileId: string): void {
+    if (!projectPermission.deleteFiles) {
+      notify("You do not have permission to delete files.");
+      return;
+    }
     const file = projectFiles.find((item) => item.id === fileId);
     setProjectFiles((prev) => prev.filter((item) => item.id !== fileId));
     if (selectedProjectFileId === fileId) {
       setSelectedProjectFileId(null);
     }
+    if (file) logProjectActivity("file deleted", file.name, selectedProjectId);
     notify(file ? `Deleted ${file.name}.` : "File deleted.");
+  }
+
+  function renameProjectFile(fileId: string): void {
+    if (!projectPermission.editFiles) {
+      notify("You do not have permission to rename files.");
+      return;
+    }
+    const file = projectFiles.find((item) => item.id === fileId);
+    if (!file) return;
+    const nextName = window.prompt("Rename file", file.name)?.trim();
+    if (!nextName) return;
+    setProjectFiles((prev) => prev.map((item) => (item.id === fileId ? { ...item, name: nextName, updatedAt: new Date().toISOString() } : item)));
+    logProjectActivity("file renamed", `${file.name} -> ${nextName}`, selectedProjectId);
+  }
+
+  function moveProjectFile(fileId: string): void {
+    if (!projectPermission.editFiles) {
+      notify("You do not have permission to move files.");
+      return;
+    }
+    const file = projectFiles.find((item) => item.id === fileId);
+    if (!file) return;
+    const destinationName = window.prompt("Move to folder name", "");
+    if (destinationName === null) return;
+    const destination = folders.find(
+      (folder) => folder.projectId === selectedProjectId && folder.name.toLowerCase() === destinationName.trim().toLowerCase(),
+    );
+    if (!destination && destinationName.trim()) {
+      notify("Destination folder not found.");
+      return;
+    }
+    setProjectFiles((prev) =>
+      prev.map((item) =>
+        item.id === fileId
+          ? { ...item, folderId: destination?.id ?? null, updatedAt: new Date().toISOString() }
+          : item,
+      ),
+    );
+    logProjectActivity("file moved", `${file.name} -> ${destination?.name ?? "Root"}`, selectedProjectId);
+  }
+
+  function copyProjectFile(fileId: string): void {
+    const file = projectFiles.find((item) => item.id === fileId);
+    if (!file) return;
+    const copy: ProjectFile = {
+      ...file,
+      id: makeId(),
+      name: `${file.name.replace(/(\.[^.]+)?$/, " (Copy)$1")}`,
+      updatedAt: new Date().toISOString(),
+      version: 1,
+    };
+    setProjectFiles((prev) => [copy, ...prev]);
+    logProjectActivity("file copied", file.name, selectedProjectId);
   }
 
   function downloadProjectFile(file: ProjectFile): void {
@@ -1750,9 +2235,14 @@ function App() {
     const bytes = dataUrlToBytes(file.dataUrl);
     const blob = new Blob([toArrayBuffer(bytes)], { type: file.mimeType ?? "application/octet-stream" });
     downloadBlob(blob, file.name);
+    logProjectActivity("file downloaded", file.name, selectedProjectId);
   }
 
   async function openProjectFileInEditor(file: ProjectFile): Promise<void> {
+    if (!projectPermission.usePdfMarkup) {
+      notify("You do not have permission to use PDF markup.");
+      return;
+    }
     if (!(file.mimeType?.includes("pdf") || file.name.toLowerCase().endsWith(".pdf"))) {
       notify("Only PDF drawings can be opened in the PDF editor.");
       return;
@@ -1766,7 +2256,52 @@ function App() {
     await handlePdfFile(drawingFile);
     window.history.pushState({}, "", "/");
     setActiveModule("markup-studio");
+    logProjectActivity("open in pdf editor", file.name, selectedProjectId);
     notify(`Opened ${file.name} in PDF editor.`);
+  }
+
+  async function saveProjectFileMarkup(
+    fileId: string,
+    result: { pdfBlob: Blob; annotations: unknown },
+  ): Promise<void> {
+    if (!projectPermission.usePdfMarkup || !projectPermission.editFiles) {
+      notify("You do not have permission to save markup changes.");
+      return;
+    }
+    const file = projectFiles.find((item) => item.id === fileId);
+    if (!file) return;
+    const nextDataUrl = await fileToDataUrl(new File([result.pdfBlob], file.name, { type: "application/pdf" }));
+    const currentVersion = file.version ?? 1;
+    setProjectFileVersions((prev) => [
+      {
+        id: makeId(),
+        fileId: file.id,
+        projectId: selectedProjectId,
+        version: currentVersion,
+        dataUrl: file.dataUrl,
+        uploadedBy: file.uploadedBy ?? CURRENT_USER.name,
+        uploadedAt: file.updatedAt,
+        changeNote: "Before markup save",
+      },
+      ...prev,
+    ]);
+    setProjectFiles((prev) =>
+      prev.map((item) =>
+        item.id === fileId
+          ? {
+              ...item,
+              dataUrl: nextDataUrl,
+              annotations: result.annotations,
+              version: currentVersion + 1,
+              updatedAt: new Date().toISOString(),
+              status: "Marked Up",
+              uploadedBy: CURRENT_USER.name,
+            }
+          : item,
+      ),
+    );
+    logProjectActivity("markup saved", file.name, selectedProjectId);
+    notify(`Saved markup to ${file.name} (v${currentVersion + 1}).`);
   }
 
   function exportTimesheetCsv(scope: "day" | "week"): void {
@@ -2895,7 +3430,6 @@ function App() {
       { key: "more", label: "More", path: "/sign-out" },
     ] as const;
 
-    const selectedProjectSlug = selectedProject?.slug ?? (route.name === "projects" && route.projectId ? route.projectId : "project");
     const mapEmbedUrl = toMapEmbedUrl(liveGps);
     const mapLinkUrl = liveGps
       ? `https://www.openstreetmap.org/?mlat=${liveGps.lat}&mlon=${liveGps.lng}#map=18/${liveGps.lat}/${liveGps.lng}`
@@ -3052,139 +3586,530 @@ function App() {
         </div>
       );
     } else if (route.name === "projects") {
-      pageTitle = route.section === "files" ? "Project Files" : "Projects";
-      pageSubtitle = "Manage folders, versions, uploads and project file previews";
-      content = (
-        <div className="opsFilesLayout">
-          <aside className="opsPanel">
-            <h3>Project</h3>
-            <div className="opsFields">
-              <label>
-                Select project
-                <select
-                  value={selectedProjectId}
-                  onChange={(event) => {
-                    const next = projects.find((project) => project.id === event.target.value);
-                    if (!next) return;
-                    setSelectedProjectId(next.id);
-                    navigateOps(`/projects/${next.slug}`);
-                  }}
-                >
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+      if (!route.projectId) {
+        pageTitle = "Projects";
+        pageSubtitle = "Manage projects, create new workspaces and open project document hubs.";
+        content = (
+          <div className="opsProjectsListLayout">
+            <section className="opsPanel">
               <div className="opsInline">
                 <input
                   type="text"
-                  placeholder="New project name"
-                  value={newProjectName}
-                  onChange={(event) => setNewProjectName(event.target.value)}
+                  placeholder="Search projects..."
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
                 />
-                <button type="button" onClick={addProject}>
+                <select value={projectStatusFilter} onChange={(event) => setProjectStatusFilter(event.target.value as Project["status"] | "all")}>
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="on_hold">On hold</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <button type="button" className="btnWarning" onClick={() => setShowNewProjectModal(true)}>
                   New Project
                 </button>
               </div>
-            </div>
-            <h3>Folder tree</h3>
-            <div className="opsFolderList">
-              <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
-                Root
-              </button>
-              {folders.map((folder) => (
-                <button key={folder.id} type="button" className={selectedFolderId === folder.id ? "active" : ""} onClick={() => setSelectedFolderId(folder.id)}>
-                  {folder.name}
-                </button>
-              ))}
-            </div>
-            <div className="opsInline">
-              <input type="text" value={newFolderName} placeholder="New folder" onChange={(event) => setNewFolderName(event.target.value)} />
-              <button type="button" onClick={() => void addFolder()} disabled={opsLoading}>
-                Add
-              </button>
-            </div>
-          </aside>
-          <section className="opsPanel">
-            <div className="opsInline">
-              <button type="button" onClick={() => navigateOps(`/projects/${selectedProjectSlug}`)}>
-                Open Project Route
-              </button>
-              <button type="button" onClick={() => navigateOps(`/projects/${selectedProjectSlug}/files`)}>
-                Open Files Route
-              </button>
-              <input type="text" value={fileSearch} placeholder="Search files" onChange={(event) => setFileSearch(event.target.value)} />
-              <label className="uploadLabel">
-                Upload File
-                <input
-                  ref={projectUploadInputRef}
-                  type="file"
-                  onChange={(event) => {
-                    void handleProjectFileUpload(event.target.files?.[0] ?? null);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </div>
-            <div className="opsList">
-              {visibleFiles.map((file) => (
-                <div
-                  key={file.id}
-                  className={`opsListRow ${selectedProjectFileId === file.id ? "opsRowActive" : ""}`}
-                  onClick={() => setSelectedProjectFileId(file.id)}
-                >
-                  <div>
-                    <strong>{file.name}</strong>
-                    <small>
-                      Version v{file.version ?? 1} • {file.status}
-                    </small>
-                    <small>
-                      Uploaded {new Date(file.updatedAt).toLocaleString()} by {file.uploadedBy ?? "Current User"}
-                    </small>
+            </section>
+
+            <section className="opsPanel">
+              <div className="opsProjectTable">
+                <div className="opsProjectTableHead">
+                  <span>Project</span>
+                  <span>Client</span>
+                  <span>Code</span>
+                  <span>Address</span>
+                  <span>Manager</span>
+                  <span>Status</span>
+                  <span>Last activity</span>
+                  <span>Files</span>
+                  <span>Team</span>
+                </div>
+                {filteredProjects.map((project) => {
+                  const filesCount = projectFiles.filter((file) => file.projectId === project.id).length;
+                  const teamCount = projectMembers.filter((member) => member.projectId === project.id).length;
+                  const lastActivity = projectActivities.find((activity) => activity.projectId === project.id);
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      className="opsProjectTableRow"
+                      onClick={() => {
+                        setSelectedProjectId(project.id);
+                        navigateOps(`/projects/${project.slug}/files`);
+                      }}
+                    >
+                      <span>{project.name}</span>
+                      <span>{project.client}</span>
+                      <span>{project.code}</span>
+                      <span>{project.address}</span>
+                      <span>{project.manager}</span>
+                      <span>{project.status}</span>
+                      <span>{lastActivity ? new Date(lastActivity.at).toLocaleString() : "-"}</span>
+                      <span>{filesCount}</span>
+                      <span>{teamCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {showNewProjectModal ? (
+              <section className="opsModalBackdrop" onClick={() => setShowNewProjectModal(false)}>
+                <div className="opsModalCard" onClick={(event) => event.stopPropagation()}>
+                  <h3>New Project</h3>
+                  <div className="opsFields">
+                    <label>
+                      Project name
+                      <input type="text" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} />
+                    </label>
+                    <label>
+                      Project code
+                      <input type="text" value={newProjectCode} onChange={(event) => setNewProjectCode(event.target.value)} />
+                    </label>
+                    <label>
+                      Client
+                      <input type="text" value={newProjectClient} onChange={(event) => setNewProjectClient(event.target.value)} />
+                    </label>
+                    <label>
+                      Site address
+                      <input type="text" value={newProjectAddress} onChange={(event) => setNewProjectAddress(event.target.value)} />
+                    </label>
+                    <label>
+                      Start date
+                      <input type="date" value={newProjectStart} onChange={(event) => setNewProjectStart(event.target.value)} />
+                    </label>
+                    <label>
+                      Target completion date
+                      <input type="date" value={newProjectTarget} onChange={(event) => setNewProjectTarget(event.target.value)} />
+                    </label>
+                    <label>
+                      Project manager
+                      <input type="text" value={newProjectManager} onChange={(event) => setNewProjectManager(event.target.value)} />
+                    </label>
+                    <label>
+                      Description
+                      <input type="text" value={newProjectDescription} onChange={(event) => setNewProjectDescription(event.target.value)} />
+                    </label>
+                    <label>
+                      Status
+                      <select value={newProjectStatus} onChange={(event) => setNewProjectStatus(event.target.value as Project["status"])}>
+                        <option value="active">Active</option>
+                        <option value="on_hold">On Hold</option>
+                        <option value="completed">Completed</option>
+                        <option value="archived">Archived</option>
+                      </select>
+                    </label>
                   </div>
-                  <div className="opsInline opsFileRowActions">
-                    <button type="button" onClick={() => setSelectedProjectFileId(file.id)}>
-                      Preview
+                  <div className="opsInline">
+                    <button type="button" onClick={() => void addProject()}>
+                      Save Project
                     </button>
-                    <button type="button" onClick={() => downloadProjectFile(file)}>
-                      Download
-                    </button>
-                    <button type="button" onClick={() => deleteProjectFile(file.id)}>
-                      Delete
-                    </button>
-                    <button type="button" onClick={() => void openProjectFileInEditor(file)}>
-                      Open in PDF Editor
+                    <button type="button" onClick={() => setShowNewProjectModal(false)}>
+                      Cancel
                     </button>
                   </div>
                 </div>
-              ))}
-              {visibleFiles.length === 0 ? <p>No files in this folder.</p> : null}
-            </div>
-            <div className="opsPanel opsFilePreview">
-              <h3>File preview</h3>
-              {selectedProjectFile ? (
-                selectedProjectFile.dataUrl && (selectedProjectFile.mimeType?.includes("pdf") || selectedProjectFile.name.toLowerCase().endsWith(".pdf")) ? (
-                  <iframe title={`Preview ${selectedProjectFile.name}`} src={selectedProjectFile.dataUrl} />
-                ) : selectedProjectFile.dataUrl && selectedProjectFile.mimeType?.startsWith("image/") ? (
-                  <img src={selectedProjectFile.dataUrl} alt={selectedProjectFile.name} />
+              </section>
+            ) : null}
+          </div>
+        );
+      } else {
+        const workspaceProject = projects.find((project) => project.slug === route.projectId) ?? selectedProject;
+        const workspaceProjectId = workspaceProject?.id ?? selectedProjectId;
+        const workspaceFolders = folders.filter((folder) => folder.projectId === workspaceProjectId);
+        const projectTabItems: Array<{ id: typeof projectWorkspaceTab; label: string }> = [
+          { id: "overview", label: "Overview" },
+          { id: "files", label: "Files" },
+          { id: "team", label: "Team" },
+          { id: "forms", label: "Forms" },
+          { id: "activity", label: "Activity" },
+          { id: "settings", label: "Settings" },
+        ];
+
+        const renderFolderTree = (parentId: string | null, depth = 0): ReactElement[] => {
+          const nodes = workspaceFolders
+            .filter((folder) => folder.parentId === parentId)
+            .sort((a, b) => a.name.localeCompare(b.name));
+          return nodes.flatMap((folder) => {
+            const children = workspaceFolders.filter((child) => child.parentId === folder.id);
+            const fileCount = projectFiles.filter((file) => file.projectId === workspaceProjectId && file.folderId === folder.id).length;
+            const expanded = expandedFolderIds[folder.id] ?? depth < 1;
+            return [
+              <div key={folder.id} className={`opsFolderTreeRow ${selectedFolderId === folder.id ? "active" : ""}`} style={{ paddingLeft: `${depth * 14}px` }}>
+                <button type="button" className="opsFolderTreeToggle" onClick={() => toggleFolderExpanded(folder.id)}>
+                  {children.length > 0 ? (expanded ? "▼" : "▶") : "•"}
+                </button>
+                <button
+                  type="button"
+                  className="opsFolderTreeName"
+                  onClick={() => {
+                    setSelectedFolderId(folder.id);
+                    setExpandedFolderIds((prev) => ({ ...prev, [folder.id]: true }));
+                  }}
+                >
+                  {folder.name} <span>({fileCount})</span>
+                </button>
+                <div className="opsFolderTreeActions">
+                  <button type="button" onClick={() => setSelectedFolderId(folder.id)}>
+                    +
+                  </button>
+                  <button type="button" onClick={() => renameFolder(folder.id)}>
+                    R
+                  </button>
+                  <button type="button" onClick={() => moveFolder(folder.id)}>
+                    M
+                  </button>
+                  <button type="button" onClick={() => deleteFolder(folder.id)}>
+                    D
+                  </button>
+                </div>
+              </div>,
+              ...(expanded ? renderFolderTree(folder.id, depth + 1) : []),
+            ];
+          });
+        };
+
+        pageTitle = workspaceProject ? workspaceProject.name : "Project Workspace";
+        pageSubtitle = workspaceProject
+          ? `${workspaceProject.client} • ${workspaceProject.code} • ${workspaceProject.address}`
+          : "Project document-management workspace";
+
+        let workspaceContent: ReactElement = <div />;
+        if (projectWorkspaceTab === "files") {
+          workspaceContent = (
+            <div className="opsWorkspace3Col">
+              <aside className="opsPanel opsWorkspacePanel">
+                <div className="opsInline">
+                  <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
+                    All Files
+                  </button>
+                  <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
+                    New Folder
+                  </button>
+                </div>
+                <div className="opsFolderTree">{renderFolderTree(null)}</div>
+              </aside>
+
+              <section
+                className="opsPanel opsWorkspacePanel"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  void handleProjectFileUpload(event.dataTransfer.files);
+                }}
+              >
+                <div className="opsInline">
+                  <button
+                    type="button"
+                    onClick={() => projectUploadInputRef.current?.click()}
+                    disabled={!projectPermission.uploadFiles}
+                  >
+                    Upload
+                  </button>
+                  <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
+                    New Folder
+                  </button>
+                  <input type="text" value={fileSearch} placeholder="Search files..." onChange={(event) => setFileSearch(event.target.value)} />
+                  <select>
+                    <option>Filter</option>
+                    <option>PDF</option>
+                    <option>Images</option>
+                    <option>Docs</option>
+                  </select>
+                  <select>
+                    <option>Sort: Modified</option>
+                    <option>Name</option>
+                    <option>Size</option>
+                  </select>
+                  <input
+                    ref={projectUploadInputRef}
+                    type="file"
+                    multiple
+                    className="hiddenInput"
+                    onChange={(event) => {
+                      void handleProjectFileUpload(event.target.files, versionUploadTargetId ?? undefined);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </div>
+                <p className="opsSubtle">Drag and drop files here to upload.</p>
+                <div className="opsList opsFileRows">
+                  {visibleFiles.map((file) => (
+                    <div key={file.id} className={`opsListRow ${selectedProjectFileId === file.id ? "opsRowActive" : ""}`}>
+                      <button type="button" className="opsFilePrimary" onClick={() => setSelectedProjectFileId(file.id)}>
+                        <strong>{file.name}</strong>
+                        <small>v{file.version ?? 1}</small>
+                        <small>{file.mimeType ?? "Unknown"}</small>
+                        <small>{new Date(file.updatedAt).toLocaleDateString()}</small>
+                        <small>{file.uploadedBy ?? CURRENT_USER.name}</small>
+                      </button>
+                      <div className="opsInline opsFileRowActions">
+                        <button type="button" onClick={() => setSelectedProjectFileId(file.id)}>
+                          Open
+                        </button>
+                        <button type="button" onClick={() => downloadProjectFile(file)}>
+                          Download
+                        </button>
+                        <button type="button" onClick={() => renameProjectFile(file.id)}>
+                          Rename
+                        </button>
+                        <button type="button" onClick={() => moveProjectFile(file.id)}>
+                          Move
+                        </button>
+                        <button type="button" onClick={() => copyProjectFile(file.id)}>
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVersionUploadTargetId(file.id);
+                            projectUploadInputRef.current?.click();
+                          }}
+                        >
+                          New Version
+                        </button>
+                        <button type="button" onClick={() => setVersionHistoryFileId(file.id)}>
+                          History
+                        </button>
+                        <button type="button" onClick={() => notify(`Share link prepared for ${file.name}.`)}>
+                          Share
+                        </button>
+                        <button type="button" onClick={() => deleteProjectFile(file.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {visibleFiles.length === 0 ? <p>No files in this folder.</p> : null}
+                </div>
+              </section>
+
+              <section className="opsPanel opsWorkspacePanel">
+                <h3>Preview / PDF Editor</h3>
+                {selectedProjectFile ? (
+                  selectedProjectFile.mimeType?.includes("pdf") || selectedProjectFile.name.toLowerCase().endsWith(".pdf") ? (
+                    <>
+                      {projectPreviewUrl ? (
+                        <div className="opsEmbeddedEditor">
+                          <PdfEditor
+                            url={projectPreviewUrl}
+                            initialAnnotations={selectedProjectFile.annotations}
+                            readOnly={!projectPermission.usePdfMarkup}
+                            onSave={(result) => saveProjectFileMarkup(selectedProjectFile.id, result)}
+                            onClose={() => setSelectedProjectFileId(null)}
+                          />
+                        </div>
+                      ) : (
+                        <p>PDF preview unavailable.</p>
+                      )}
+                      <div className="opsInline">
+                        <button type="button" onClick={() => void openProjectFileInEditor(selectedProjectFile)}>
+                          Open in full editor
+                        </button>
+                        <button type="button" onClick={() => downloadProjectFile(selectedProjectFile)}>
+                          Download
+                        </button>
+                      </div>
+                    </>
+                  ) : selectedProjectFile.mimeType?.startsWith("image/") && selectedProjectFile.dataUrl ? (
+                    <img src={selectedProjectFile.dataUrl} alt={selectedProjectFile.name} className="opsPreviewImage" />
+                  ) : (
+                    <div className="opsFileDetails">
+                      <p>Preview not supported for this file type.</p>
+                      <p>Name: {selectedProjectFile.name}</p>
+                      <p>Type: {selectedProjectFile.mimeType ?? "Unknown"}</p>
+                      <button type="button" onClick={() => downloadProjectFile(selectedProjectFile)}>
+                        Download
+                      </button>
+                    </div>
+                  )
                 ) : (
-                  <p>No embeddable preview for this file type.</p>
-                )
-              ) : (
-                <p>Select a file to preview.</p>
-              )}
+                  <p>Select a file to preview.</p>
+                )}
+
+                {versionHistoryFileId ? (
+                  <div className="opsPanel opsVersionHistory">
+                    <div className="opsInline">
+                      <h4>Version History</h4>
+                      <button type="button" onClick={() => setVersionHistoryFileId(null)}>
+                        Close
+                      </button>
+                    </div>
+                    <div className="opsList">
+                      {selectedFileVersions.map((version) => (
+                        <div key={version.id} className="opsListRow">
+                          <div>
+                            <strong>v{version.version}</strong>
+                            <small>{new Date(version.uploadedAt).toLocaleString()}</small>
+                            <small>{version.uploadedBy}</small>
+                            <small>{version.changeNote ?? "-"}</small>
+                          </div>
+                          <div className="opsInline">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!version.dataUrl) return;
+                                const target = projectFiles.find((file) => file.id === version.fileId);
+                                if (!target) return;
+                                setProjectFiles((prev) =>
+                                  prev.map((file) =>
+                                    file.id === target.id
+                                      ? {
+                                          ...file,
+                                          dataUrl: version.dataUrl,
+                                          version: version.version + 1,
+                                          updatedAt: new Date().toISOString(),
+                                          status: "Restored",
+                                        }
+                                      : file,
+                                  ),
+                                );
+                                logProjectActivity("version restored", target.name, selectedProjectId);
+                              }}
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {selectedFileVersions.length === 0 ? <p>No previous versions.</p> : null}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
             </div>
-            <div className="opsInline">
-              <input type="text" value={newFileName} placeholder="File name" onChange={(event) => setNewFileName(event.target.value)} />
-              <button type="button" onClick={() => void addProjectFile()} disabled={opsLoading}>
-                Upload
-              </button>
+          );
+        } else if (projectWorkspaceTab === "overview") {
+          workspaceContent = (
+            <div className="opsOverviewGrid">
+              <section className="opsPanel">
+                <h3>Project Details</h3>
+                <p>Manager: {workspaceProject?.manager}</p>
+                <p>Status: {workspaceProject?.status}</p>
+                <p>Start: {workspaceProject?.startDate}</p>
+                <p>Target: {workspaceProject?.targetDate || "-"}</p>
+                <p>{workspaceProject?.description || "No description."}</p>
+              </section>
+              <section className="opsPanel">
+                <h3>Summary</h3>
+                <p>Files: {projectFiles.filter((file) => file.projectId === workspaceProjectId).length}</p>
+                <p>Forms: {completedFormIds.length}</p>
+                <p>Timesheet hours: {formatMinutes(timeSummary.totalMinutes)}</p>
+              </section>
             </div>
-          </section>
-        </div>
-      );
+          );
+        } else if (projectWorkspaceTab === "team") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <table className="opsTable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Permission</th>
+                    <th>Date added</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedProjectMembers.map((member) => (
+                    <tr key={member.id}>
+                      <td>{member.name}</td>
+                      <td>{member.email}</td>
+                      <td>{member.role}</td>
+                      <td>{member.permission.manageTeam ? "Manage" : "Limited"}</td>
+                      <td>{new Date(member.dateAdded).toLocaleDateString()}</td>
+                      <td>{member.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          );
+        } else if (projectWorkspaceTab === "forms") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <div className="opsList">
+                {FORM_TEMPLATES.map((form) => (
+                  <div key={form.id} className="opsListRow">
+                    <div>
+                      <strong>{form.name}</strong>
+                      <small>{form.version}</small>
+                    </div>
+                    <div className="opsInline">
+                      <button type="button" onClick={() => navigateOps(`/forms/${form.id}/fill`)}>
+                        Open
+                      </button>
+                      <button type="button" onClick={() => navigateOps(`/forms/submissions/${form.id}/export`)}>
+                        Export
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        } else if (projectWorkspaceTab === "activity") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <div className="opsList">
+                {selectedProjectActivity.map((entry) => (
+                  <div key={entry.id} className="opsListRow">
+                    <div>
+                      <strong>{entry.action}</strong>
+                      <small>{entry.item}</small>
+                      <small>{entry.user}</small>
+                    </div>
+                    <span>{new Date(entry.at).toLocaleString()}</span>
+                  </div>
+                ))}
+                {selectedProjectActivity.length === 0 ? <p>No project activity yet.</p> : null}
+              </div>
+            </section>
+          );
+        } else {
+          workspaceContent = (
+            <section className="opsPanel">
+              <h3>Settings</h3>
+              <p>Project permissions and configuration controls are managed here.</p>
+            </section>
+          );
+        }
+
+        content = (
+          <div className="opsProjectWorkspace">
+            <section className="opsPanel opsProjectWorkspaceHeader">
+              <div className="opsProjectMeta">
+                <h3>{workspaceProject?.name ?? "Project"}</h3>
+                <p>
+                  {workspaceProject?.client} • {workspaceProject?.code} • {workspaceProject?.address}
+                </p>
+                <p>
+                  Status: {workspaceProject?.status} • Manager: {workspaceProject?.manager} • Start: {workspaceProject?.startDate}
+                </p>
+              </div>
+              <div className="opsInline">
+                <button type="button" onClick={() => setShowNewProjectModal(true)}>
+                  Edit Project
+                </button>
+                <button type="button" onClick={() => notify("More project actions opened.")}>
+                  More actions
+                </button>
+              </div>
+            </section>
+            <section className="opsProjectTabs">
+              {projectTabItems.map((tab) => (
+                <button key={tab.id} type="button" className={projectWorkspaceTab === tab.id ? "active" : ""} onClick={() => setProjectWorkspaceTab(tab.id)}>
+                  {tab.label}
+                </button>
+              ))}
+            </section>
+            {workspaceContent}
+          </div>
+        );
+      }
     } else if (route.name === "forms") {
       if (route.mode === "fill") {
         pageTitle = activeForm ? `Form: ${activeForm.name}` : "Form Completion";
@@ -3440,8 +4365,8 @@ function App() {
               <p>{pageSubtitle}</p>
             </div>
             <div className="opsHeaderMeta">
-              <span>Route: {opsPathname}</span>
-              <span>{hasSupabaseConfig ? "Supabase" : "Local Storage"}</span>
+              <span>{new Date().toLocaleDateString()}</span>
+              <span>{CURRENT_USER.name}</span>
             </div>
           </header>
           <section className="opsPageContent">{content}</section>

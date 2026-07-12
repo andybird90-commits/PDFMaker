@@ -830,6 +830,208 @@ label {
   }
 }
 
+.opsProjectsListLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.opsProjectTable {
+  width: 100%;
+}
+
+.opsProjectTableHead,
+.opsProjectTableRow {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 0.7fr 1.2fr 1fr 0.8fr 1fr 0.5fr 0.5fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.opsProjectTableHead {
+  color: #9fb2cd;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid #2f4866;
+}
+
+.opsProjectTableRow {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #263e5a;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.opsModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.7);
+  display: grid;
+  place-items: center;
+  z-index: 20;
+}
+
+.opsModalCard {
+  width: min(680px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid #2b425e;
+  border-radius: 12px;
+  background: #0d1b2d;
+  padding: 0.9rem;
+}
+
+.opsProjectWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.opsProjectWorkspaceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: start;
+}
+
+.opsProjectMeta h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.opsProjectMeta p {
+  margin: 0.2rem 0 0;
+  color: #97abc4;
+  font-size: 0.78rem;
+}
+
+.opsProjectTabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.opsWorkspace3Col {
+  display: grid;
+  grid-template-columns: 260px minmax(420px, 1fr) minmax(420px, 1.2fr);
+  gap: 0.7rem;
+  min-height: 68vh;
+}
+
+.opsWorkspacePanel {
+  min-height: 0;
+  overflow: auto;
+}
+
+.opsFolderTree {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.opsFolderTreeRow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid #273f5a;
+  border-radius: 6px;
+  padding: 0.2rem;
+}
+
+.opsFolderTreeRow.active {
+  border-color: #f97316;
+}
+
+.opsFolderTreeToggle {
+  min-width: 24px;
+  padding: 0.2rem;
+}
+
+.opsFolderTreeName {
+  flex: 1;
+  text-align: left;
+  font-size: 0.76rem;
+}
+
+.opsFolderTreeName span {
+  color: #94a3b8;
+}
+
+.opsFolderTreeActions {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.opsFolderTreeActions button {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0.1rem;
+  font-size: 0.65rem;
+}
+
+.opsFileRows {
+  max-height: 48vh;
+  overflow: auto;
+}
+
+.opsFilePrimary {
+  flex: 1;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.opsEmbeddedEditor {
+  height: 60vh;
+  min-height: 420px;
+}
+
+.opsPreviewImage {
+  width: 100%;
+  border: 1px solid #2f4866;
+  border-radius: 8px;
+}
+
+.opsVersionHistory {
+  margin-top: 0.6rem;
+}
+
+.opsOverviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 767px) {
+  .opsProjectTableHead {
+    display: none;
+  }
+  .opsProjectTableRow {
+    grid-template-columns: 1fr;
+  }
+  .opsWorkspace3Col {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+  .opsOverviewGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  .opsWorkspace3Col {
+    grid-template-columns: 320px 1fr;
+  }
+  .opsWorkspace3Col > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
 .opsFolderGrid {
   display: grid;
   grid-template-columns: 130px 1fr;
