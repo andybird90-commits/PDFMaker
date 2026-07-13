@@ -2134,7 +2134,20 @@ function App() {
           }.`,
         );
       } catch (error) {
-        notify(`Clock event failed: ${error instanceof Error ? error.message : String(error)}`);
+        const fallbackEntry: TimeEntry = {
+          id: makeId(),
+          workerId,
+          action,
+          at: new Date().toISOString(),
+          note: gpsNote,
+        };
+        setTimeEntries((prev) => [fallbackEntry, ...prev]);
+        notify(
+          `Cloud clock event failed (${getErrorMessage(error)}). ` +
+            `${worker.name} ${action === "clock_in" ? "clocked in" : "clocked out"} locally instead${
+              gps ? ` (GPS ${gps.accuracyM}m)` : ""
+            }.`,
+        );
       } finally {
         setOpsLoading(false);
       }
