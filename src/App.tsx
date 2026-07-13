@@ -369,13 +369,10 @@ function App() {
   const [projectWorkspaceTab, setProjectWorkspaceTab] = useState<"overview" | "files" | "team" | "forms" | "activity" | "settings">("files");
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
-  const [newWorkerName, setNewWorkerName] = useState<string>("");
-  const [newWorkerRole, setNewWorkerRole] = useState<string>("Technician");
   const [newFolderName, setNewFolderName] = useState<string>("");
   const [newFileName, setNewFileName] = useState<string>("");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [opsLoading, setOpsLoading] = useState<boolean>(false);
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
   const [opsProjectName, setOpsProjectName] = useState<string>("New Street Square");
   const [opsLocationName, setOpsLocationName] = useState<string>("London EC4A 3BZ");
   const [fileSearch, setFileSearch] = useState<string>("");
@@ -485,6 +482,11 @@ function App() {
       email,
     };
   }, [authSession]);
+  const authWorkerId = authSession?.user?.id ?? "";
+  const authWorker = useMemo(
+    () => (authWorkerId ? workers.find((worker) => worker.id === authWorkerId) ?? null : null),
+    [workers, authWorkerId],
+  );
   const currentProjectMember = useMemo(
     () =>
       selectedProjectMembers.find((member) => member.email.toLowerCase() === currentUser.email.toLowerCase()) ??
@@ -581,17 +583,6 @@ function App() {
       recentDayBreakdown,
     };
   }, [timeEntries, workerById]);
-  useEffect(() => {
-    if (workers.length === 0) {
-      setSelectedWorkerId("");
-      return;
-    }
-    const stillExists = workers.some((worker) => worker.id === selectedWorkerId);
-    if (!stillExists) {
-      setSelectedWorkerId(workers[0].id);
-    }
-  }, [workers, selectedWorkerId]);
-
   useEffect(() => {
     if (projects.length === 0) return;
     if (folders.length === 0) {
@@ -893,6 +884,60 @@ function App() {
       }
     }
   }, [authSession, workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
+
+  useEffect(() => {
+    if (!authSession || !authWorkerId) return;
+    if (authWorker) {
+      if (authWorker.name !== currentUser.name || authWorker.role !== "Technician") {
+        setWorkers((prev) =>
+          prev.map((worker) =>
+            worker.id === authWorkerId
+              ? {
+                  ...worker,
+                  name: currentUser.name,
+                  role: worker.role || "Technician",
+                }
+              : worker,
+          ),
+        );
+      }
+      return;
+    }
+
+    const nextWorker: Worker = {
+      id: authWorkerId,
+      name: currentUser.name,
+      role: "Technician",
+    };
+
+    if (hasSupabaseConfig && supabase) {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const { error } = await supabase.from("workers").upsert(
+            {
+              id: nextWorker.id,
+              name: nextWorker.name,
+              role: nextWorker.role,
+            },
+            { onConflict: "id" },
+          );
+          if (error) throw error;
+          if (cancelled) return;
+          setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
+        } catch (error) {
+          if (cancelled) return;
+          setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
+          notify(`Could not sync your worker profile to Supabase, using local profile. (${getErrorMessage(error)})`);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
+  }, [authSession, authWorkerId, authWorker, currentUser.name]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1767,47 +1812,6 @@ function App() {
       capturedAt: new Date().toISOString(),
       source: "device",
     });
-  }
-
-  async function addWorker(): Promise<void> {
-    const name = newWorkerName.trim();
-    if (!name) {
-      notify("Enter worker name.");
-      return;
-    }
-    const role = newWorkerRole.trim() || "Technician";
-    if (hasSupabaseConfig && supabase) {
-      setOpsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("workers")
-          .insert({ name, role })
-          .select("id,name,role")
-          .single();
-        if (error) throw error;
-        const worker: Worker = {
-          id: data.id,
-          name: data.name,
-          role: data.role,
-        };
-        setWorkers((prev) => [worker, ...prev]);
-        setNewWorkerName("");
-        notify(`Added worker ${worker.name}.`);
-      } catch (error) {
-        notify(`Add worker failed: ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
-        setOpsLoading(false);
-      }
-      return;
-    }
-    const worker: Worker = {
-      id: makeId(),
-      name,
-      role,
-    };
-    setWorkers((prev) => [worker, ...prev]);
-    setNewWorkerName("");
-    notify(`Added worker ${worker.name}.`);
   }
 
   async function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): Promise<void> {
@@ -3803,7 +3807,7 @@ function App() {
 
   function renderOperationsModule(): ReactElement {
     const route = opsRoute;
-    const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId) ?? null;
+    const selectedWorker = authWorker;
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
     const currentFormId = route.name === "forms" ? route.formId : undefined;
     const activeForm = FORM_TEMPLATES.find((form) => form.id === (currentFormId ?? activeFormId ?? "")) ?? null;
@@ -3829,12 +3833,12 @@ function App() {
       : "https://www.openstreetmap.org";
 
     let pageTitle = "Sign In";
-    let pageSubtitle = "Sign workers into the selected project";
+    let pageSubtitle = "Securely sign yourself into the selected project";
     let content: ReactElement = <div />;
 
     if (route.name === "sign-out") {
       pageTitle = "GPS Sign Out";
-      pageSubtitle = "Sign workers out from the selected project";
+      pageSubtitle = "Securely sign yourself out from the selected project";
       content = (
         <div className="opsSignOutGrid">
           <section className="opsPanel">
@@ -3871,19 +3875,22 @@ function App() {
           </section>
 
           <section className="opsPanel">
-            <h3>Current signed-in workers</h3>
+            <h3>Your current sign-in status</h3>
             <div className="opsList">
-              {signedInWorkers.length === 0 ? (
-                <p>No workers currently signed in.</p>
+              {!selectedWorker ? (
+                <p>Preparing your worker profile…</p>
+              ) : latestEntryByWorker[selectedWorker.id]?.action !== "clock_in" ? (
+                <p>You are not currently signed in.</p>
               ) : (
-                signedInWorkers.map(({ worker, lastEntry }) => {
+                (() => {
+                  const lastEntry = latestEntryByWorker[selectedWorker.id];
                   const signedAt = lastEntry ? new Date(lastEntry.at) : null;
                   const elapsedMinutes = signedAt ? Math.max(0, Math.round((Date.now() - signedAt.getTime()) / 60000)) : 0;
                   const gps = parseGpsNote(lastEntry?.note);
                   return (
-                    <div key={worker.id} className="opsListRow">
+                    <div key={selectedWorker.id} className="opsListRow">
                       <div>
-                        <strong>{worker.name}</strong>
+                        <strong>{selectedWorker.name}</strong>
                         <small>Signed in: {signedAt ? signedAt.toLocaleString() : "-"}</small>
                         <small>Duration: {formatMinutes(elapsedMinutes)}</small>
                         <small>{gps ? `GPS ${gps.accuracyM}m` : "GPS unavailable"}</small>
@@ -3893,15 +3900,14 @@ function App() {
                         className="btnWarning"
                         disabled={opsLoading}
                         onClick={() => {
-                          setSelectedWorkerId(worker.id);
-                          void addTimeEntry(worker.id, "clock_out");
+                          void addTimeEntry(selectedWorker.id, "clock_out");
                         }}
                       >
                         Sign Out
                       </button>
                     </div>
                   );
-                })
+                })()
               )}
             </div>
           </section>
@@ -4716,7 +4722,7 @@ function App() {
       }
     } else {
       pageTitle = "GPS Sign In";
-      pageSubtitle = "Capture project and worker attendance with geofence checks";
+      pageSubtitle = "Capture project and your attendance with geofence checks";
       const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
       const selectedWorkerGps = parseGpsNote(selectedWorkerLastAction?.note);
       const clockInCheck = selectedWorker ? canApplyClockAction(selectedWorker.id, "clock_in") : { ok: false };
@@ -4732,22 +4738,10 @@ function App() {
               <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
             </label>
             <label>
-              Worker
-              <select value={selectedWorkerId} onChange={(event) => setSelectedWorkerId(event.target.value)}>
-                {workers.map((worker) => (
-                  <option key={worker.id} value={worker.id}>
-                    {worker.name}
-                  </option>
-                ))}
-              </select>
+              Logged in user
+              <input type="text" value={`${currentUser.name} (${currentUser.email})`} readOnly />
             </label>
-            <div className="opsInline">
-              <input type="text" placeholder="New worker name" value={newWorkerName} onChange={(event) => setNewWorkerName(event.target.value)} />
-              <input type="text" placeholder="Role" value={newWorkerRole} onChange={(event) => setNewWorkerRole(event.target.value)} />
-              <button type="button" onClick={() => void addWorker()}>
-                Add Worker
-              </button>
-            </div>
+            <p className="opsSubtle">Attendance is locked to your authenticated account. You cannot sign in as another worker.</p>
             <p className="opsSubtle">
               GPS accuracy: {liveGps ? `${liveGps.accuracyM}m` : selectedWorkerGps ? `${selectedWorkerGps.accuracyM}m` : "not captured yet"} |
               Geofence: {(liveGps && liveGps.accuracyM <= 50) || (selectedWorkerGps && selectedWorkerGps.accuracyM <= 50) ? "inside" : "check location"}
