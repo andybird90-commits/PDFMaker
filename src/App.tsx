@@ -125,7 +125,14 @@ type ProjectFile = {
   version?: number;
   annotations?: unknown;
 };
-type FormTemplate = { id: string; name: string; version: string; updatedAt: string };
+type FormTemplate = {
+  id: string;
+  name: string;
+  version: string;
+  updatedAt: string;
+  fileName: string;
+  assetPath: string;
+};
 type GpsSnapshot = {
   lat: number;
   lng: number;
@@ -178,11 +185,54 @@ const STAMP_PRESETS: Array<{ id: string; label: string; color: string }> = [
   { id: "status-c", label: "STATUS C", color: "#dc2626" },
 ];
 const FORM_TEMPLATES: FormTemplate[] = [
-  { id: "site-inspection", name: "Site Inspection", version: "v1.3", updatedAt: "09/07/2025" },
-  { id: "daily-report", name: "Daily Site Report", version: "v2.1", updatedAt: "08/06/2025" },
-  { id: "rams", name: "RAMS", version: "v1.0", updatedAt: "15/06/2025" },
-  { id: "materials-delivery", name: "Materials Delivery", version: "v1.2", updatedAt: "10/06/2025" },
-  { id: "handover-checklist", name: "Handover Checklist", version: "v1.1", updatedAt: "05/06/2025" },
+  {
+    id: "split-commissioning",
+    name: "Split Commissioning",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - Split Commissioning.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_Split_Commissioning_fb77.pdf",
+  },
+  {
+    id: "hvrf-log-book",
+    name: "HVRF Log Book",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - HVRF Log Book.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_HVRF_Log_Book_8d76.pdf",
+  },
+  {
+    id: "10-fcu-commissioning-vrf",
+    name: "10 FCU Commissioning VRF",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - 10 FCU Commissioning VRF.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_10_FCU_Commissioning_VRF_bc3f.pdf",
+  },
+  {
+    id: "20-fcu-commissioning-vrf",
+    name: "20 FCU Commissioning VRF",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - 20 FCU Commissioning VRF.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_20_FCU_Commissioning_VRF_f4f9.pdf",
+  },
+  {
+    id: "30-fcu-commissioning-vrf",
+    name: "30 FCU Commissioning VRF",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - 30 FCU Commissioning VRF.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_30_FCU_Commissioning_VRF_817a.pdf",
+  },
+  {
+    id: "40-fcu-commissioning-vrf",
+    name: "40 FCU Commissioning VRF",
+    version: "v1.0",
+    updatedAt: "13/07/2026",
+    fileName: "Job Name - Area - LAC - 40 FCU Commissioning VRF.pdf",
+    assetPath: "/Job_Name_-_Area_-_LAC_-_40_FCU_Commissioning_VRF_4129.pdf",
+  },
 ];
 const DEFAULT_PROJECTS: Project[] = [
   {
@@ -2116,16 +2166,18 @@ function App() {
       fileSize?: number;
       replaceFileId?: string;
       changeNote?: string;
+      folderId?: string | null;
     },
-  ): Promise<void> {
+  ): Promise<ProjectFile | null> {
     if (!projectPermission.uploadFiles) {
       notify("You do not have permission to upload files.");
-      return;
+      return null;
     }
     const name = (override?.name ?? newFileName).trim();
+    const targetFolderId = override?.folderId ?? selectedFolderId;
     if (!name) {
       notify("Enter file name.");
-      return;
+      return null;
     }
     const replaceTarget = override?.replaceFileId ? projectFiles.find((file) => file.id === override.replaceFileId) : null;
     if (replaceTarget) {
@@ -2160,7 +2212,16 @@ function App() {
       );
       logProjectActivity("new version uploaded", name, selectedProjectId);
       notify(`Uploaded v${currentVersion + 1} for ${name}.`);
-      return;
+      return {
+        ...replaceTarget,
+        name,
+        mimeType: override?.mimeType ?? replaceTarget.mimeType,
+        dataUrl: override?.dataUrl ?? replaceTarget.dataUrl,
+        updatedAt: new Date().toISOString(),
+        uploadedBy: override?.uploadedBy ?? currentUser.name,
+        version: currentVersion + 1,
+        status: "Current",
+      };
     }
 
     if (hasSupabaseConfig && supabase) {
@@ -2170,7 +2231,7 @@ function App() {
         const { data, error } = await supabase
           .from("project_files")
           .insert({
-            folder_id: selectedFolderId,
+            folder_id: targetFolderId,
             name,
             status: "Draft",
             updated_at: now,
@@ -2194,11 +2255,12 @@ function App() {
         setNewFileName("");
         logProjectActivity("file uploaded", file.name, selectedProjectId);
         notify(`Added file ${file.name}.`);
+        return file;
       } catch (error) {
         const fallbackFile: ProjectFile = {
           id: makeId(),
           projectId: selectedProjectId,
-          folderId: selectedFolderId,
+          folderId: targetFolderId,
           name,
           updatedAt: new Date().toISOString(),
           status: "Draft",
@@ -2214,15 +2276,16 @@ function App() {
           `Cloud upload unavailable (${error instanceof Error ? error.message : String(error)}). ` +
             `File saved locally for this session.`,
         );
+        return fallbackFile;
       } finally {
         setOpsLoading(false);
       }
-      return;
+      return null;
     }
     const file: ProjectFile = {
       id: makeId(),
       projectId: selectedProjectId,
-      folderId: selectedFolderId,
+      folderId: targetFolderId,
       name,
       updatedAt: new Date().toISOString(),
       status: "Draft",
@@ -2235,6 +2298,81 @@ function App() {
     setNewFileName("");
     logProjectActivity("file uploaded", file.name, selectedProjectId);
     notify(`Added file ${file.name}.`);
+    return file;
+  }
+
+  function getProjectFormsFolderId(projectId: string): string | null {
+    const preferred = folders.find(
+      (folder) =>
+        folder.projectId === projectId &&
+        folder.parentId === null &&
+        folder.name.trim().toLowerCase() === "06_forms",
+    );
+    if (preferred) return preferred.id;
+    const fallback = folders.find(
+      (folder) => folder.projectId === projectId && folder.name.toLowerCase().includes("form"),
+    );
+    return fallback?.id ?? null;
+  }
+
+  function makeUniqueProjectFileName(baseName: string, projectId: string): string {
+    const normalizedBase = baseName.trim() || "Form.pdf";
+    if (!projectFiles.some((file) => file.projectId === projectId && file.name.toLowerCase() === normalizedBase.toLowerCase())) {
+      return normalizedBase;
+    }
+    const extensionIndex = normalizedBase.lastIndexOf(".");
+    const namePart = extensionIndex > 0 ? normalizedBase.slice(0, extensionIndex) : normalizedBase;
+    const extPart = extensionIndex > 0 ? normalizedBase.slice(extensionIndex) : "";
+    let index = 2;
+    while (true) {
+      const candidate = `${namePart} (${index})${extPart}`;
+      const exists = projectFiles.some((file) => file.projectId === projectId && file.name.toLowerCase() === candidate.toLowerCase());
+      if (!exists) return candidate;
+      index += 1;
+    }
+  }
+
+  async function downloadFormTemplate(template: FormTemplate): Promise<void> {
+    try {
+      const response = await fetch(template.assetPath);
+      if (!response.ok) throw new Error(`Template fetch failed (${response.status})`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      downloadBlob(new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }), template.fileName);
+      notify(`Downloaded template ${template.name}.`);
+    } catch (error) {
+      notify(`Could not download template: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async function startProjectFormFromTemplate(template: FormTemplate): Promise<void> {
+    if (!selectedProject) {
+      notify("Select a project first.");
+      return;
+    }
+    if (!projectPermission.uploadFiles) {
+      notify("You do not have permission to create forms.");
+      return;
+    }
+    try {
+      const response = await fetch(template.assetPath);
+      if (!response.ok) throw new Error(`Template fetch failed (${response.status})`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const formsFolderId = getProjectFormsFolderId(selectedProject.id);
+      const fileName = makeUniqueProjectFileName(template.fileName, selectedProject.id);
+      const createdFile = await addProjectFile({
+        name: fileName,
+        mimeType: "application/pdf",
+        dataUrl: `data:application/pdf;base64,${bytesToBase64(bytes)}`,
+        uploadedBy: currentUser.name,
+        fileSize: bytes.byteLength,
+        folderId: formsFolderId,
+      });
+      if (!createdFile) return;
+      logProjectActivity("form created", `${template.name} template`, selectedProject.id);
+      await openProjectFileFullView(createdFile, selectedProject.slug);
+    } catch (error) {
+      notify(`Could not create form from template: ${getErrorMessage(error)}`);
+    }
   }
 
   async function handleProjectFileUpload(files: FileList | File[] | null, targetFileId?: string): Promise<void> {
@@ -4161,6 +4299,18 @@ function App() {
         const workspaceProject = projects.find((project) => project.slug === route.projectId) ?? selectedProject;
         const workspaceProjectId = workspaceProject?.id ?? selectedProjectId;
         const workspaceFolders = folders.filter((folder) => folder.projectId === workspaceProjectId);
+        const workspaceFormsFolderIds = workspaceFolders
+          .filter((folder) => folder.name.toLowerCase().includes("form"))
+          .map((folder) => folder.id);
+        const projectFormFiles = projectFiles
+          .filter((file) => {
+            if (file.projectId !== workspaceProjectId) return false;
+            if (file.mimeType && !file.mimeType.includes("pdf")) return false;
+            if (workspaceFormsFolderIds.includes(file.folderId ?? "")) return true;
+            const fileName = file.name.toLowerCase();
+            return FORM_TEMPLATES.some((template) => fileName === template.fileName.toLowerCase() || fileName.includes(template.id));
+          })
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         const projectTabItems: Array<{ id: typeof projectWorkspaceTab; label: string }> = [
           { id: "overview", label: "Overview" },
           { id: "files", label: "Files" },
@@ -4489,7 +4639,7 @@ function App() {
               <section className="opsPanel">
                 <h3>Summary</h3>
                 <p>Files: {projectFiles.filter((file) => file.projectId === workspaceProjectId).length}</p>
-                <p>Forms: {completedFormIds.length}</p>
+                <p>Forms: {projectFormFiles.length}</p>
                 <p>Timesheet hours: {formatMinutes(timeSummary.totalMinutes)}</p>
               </section>
             </div>
@@ -4525,26 +4675,58 @@ function App() {
           );
         } else if (projectWorkspaceTab === "forms") {
           workspaceContent = (
-            <section className="opsPanel">
-              <div className="opsList">
-                {FORM_TEMPLATES.map((form) => (
-                  <div key={form.id} className="opsListRow">
-                    <div>
-                      <strong>{form.name}</strong>
-                      <small>{form.version}</small>
+            <div className="opsOverviewGrid">
+              <section className="opsPanel">
+                <h3>Commissioning Templates</h3>
+                <p className="opsSubtle">Start a new project form from your common commissioning templates.</p>
+                <div className="opsList">
+                  {FORM_TEMPLATES.map((form) => (
+                    <div key={form.id} className="opsListRow">
+                      <div>
+                        <strong>{form.name}</strong>
+                        <small>
+                          {form.version} • Updated {form.updatedAt}
+                        </small>
+                      </div>
+                      <div className="opsInline">
+                        <button type="button" onClick={() => void startProjectFormFromTemplate(form)}>
+                          Start Form
+                        </button>
+                        <button type="button" onClick={() => void downloadFormTemplate(form)}>
+                          Download Blank
+                        </button>
+                      </div>
                     </div>
-                    <div className="opsInline">
-                      <button type="button" onClick={() => navigateOps(`/forms/${form.id}/fill`)}>
-                        Open
-                      </button>
-                      <button type="button" onClick={() => navigateOps(`/forms/submissions/${form.id}/export`)}>
-                        Export
-                      </button>
+                  ))}
+                </div>
+              </section>
+              <section className="opsPanel">
+                <h3>Project Form Register</h3>
+                <p className="opsSubtle">Open or export forms already created for this project.</p>
+                <div className="opsList">
+                  {projectFormFiles.map((formFile) => (
+                    <div key={formFile.id} className="opsListRow">
+                      <div>
+                        <strong>{formFile.name}</strong>
+                        <small>
+                          v{formFile.version ?? 1} • Updated {new Date(formFile.updatedAt).toLocaleString()}
+                        </small>
+                        <small>{formFile.uploadedBy ?? currentUser.name}</small>
+                      </div>
+                      <div className="opsInline">
+                        <button type="button" onClick={() => void openProjectFileFullView(formFile, workspaceProject?.slug ?? "project")}>
+                          Open in Editor
+                        </button>
+                        <button type="button" onClick={() => downloadProjectFile(formFile)}>
+                          Export PDF
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+                  ))}
+                  {projectFormFiles.length === 0 ? <p>No project forms created yet.</p> : null}
+                </div>
+              </section>
+            </div>
           );
         } else if (projectWorkspaceTab === "activity") {
           workspaceContent = (
