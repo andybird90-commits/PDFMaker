@@ -3834,30 +3834,17 @@ function App() {
 
     if (route.name === "home") {
       pageTitle = "Operations Home";
-      pageSubtitle = "Choose clock in/out or open your project workspace";
+      pageSubtitle = "Choose a module";
       content = (
-        <div className="opsSummaryGrid">
-          <section className="opsSummaryCard">
-            <h4>Clock In / Out</h4>
-            <p className="opsSubtle">Go to GPS attendance to sign in or sign out your authenticated account.</p>
-            <div className="opsInline">
-              <button type="button" className="btnSuccess" onClick={() => navigateOps("/sign-in")}>
-                Open Clock In
-              </button>
-              <button type="button" className="btnWarning" onClick={() => navigateOps("/sign-out")}>
-                Open Clock Out
-              </button>
-            </div>
-          </section>
-          <section className="opsSummaryCard">
-            <h4>Projects</h4>
-            <p className="opsSubtle">Open your project overview, documents and full markup editor workflows.</p>
-            <div className="opsInline">
-              <button type="button" onClick={() => navigateOps("/projects")}>
-                Open Projects
-              </button>
-            </div>
-          </section>
+        <div className="opsLandingTiles">
+          <button type="button" className="opsLandingTile" onClick={() => navigateOps("/sign-in")}>
+            <strong>Clock In / Out</strong>
+            <span>Open GPS attendance</span>
+          </button>
+          <button type="button" className="opsLandingTile" onClick={() => navigateOps("/projects")}>
+            <strong>Projects</strong>
+            <span>Open project overview</span>
+          </button>
         </div>
       );
     } else if (route.name === "sign-out") {

@@ -749,6 +749,37 @@ label {
   font-size: 1.15rem;
 }
 
+.opsLandingTiles {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.opsLandingTile {
+  width: 100%;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0.3rem;
+  border-radius: 12px;
+  border: 1px solid #2f4f70;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.68), rgba(13, 35, 58, 0.78));
+  padding: 1rem;
+  text-align: left;
+}
+
+.opsLandingTile strong {
+  font-size: 1rem;
+  color: #f8fafc;
+}
+
+.opsLandingTile span {
+  color: #9fb2cd;
+  font-size: 0.82rem;
+}
+
 .opsTable {
   width: 100%;
   border-collapse: collapse;
@@ -806,6 +837,9 @@ label {
   .opsSignInGrid {
     grid-template-columns: 1fr 1fr;
   }
+  .opsLandingTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 1100px) {
@@ -856,6 +890,9 @@ label {
   }
   .opsSignInGrid {
     grid-template-columns: 1fr 1.2fr;
+  }
+  .opsLandingTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
