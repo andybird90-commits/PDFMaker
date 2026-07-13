@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { PDFDocument, degrees, rgb } from "pdf-lib";
+import type { Session } from "@supabase/supabase-js";
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
@@ -147,6 +148,7 @@ type BatchDocument = {
   rotationByPage: Record<number, number>;
 };
 type ToolbarPanel = "file" | "tools" | "view" | "stamps" | "edit" | "selected";
+type AuthMode = "login" | "signup" | "forgot" | "reset";
 type ProjectEditorContext = {
   projectId: string;
   fileId: string;
@@ -231,8 +233,9 @@ const OWNER_PERMISSION: ProjectPermission = {
 };
 const CURRENT_USER = {
   name: "Andy Bird",
-  email: "andy@example.com",
+  email: "andy.bird@rdmande.uk",
 };
+const OWNER_EMAIL = "andy.bird@rdmande.uk";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -390,6 +393,14 @@ function App() {
   const [openFileNeedsSaveWarning, setOpenFileNeedsSaveWarning] = useState<boolean>(false);
   const [isCompactToolbar, setIsCompactToolbar] = useState<boolean>(() => window.innerWidth <= 1280);
   const [activeToolbarPanel, setActiveToolbarPanel] = useState<ToolbarPanel>("tools");
+  const [authSession, setAuthSession] = useState<Session | null>(null);
+  const [authInitializing, setAuthInitializing] = useState<boolean>(hasSupabaseConfig);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState<string>(OWNER_EMAIL);
+  const [authPassword, setAuthPassword] = useState<string>("");
+  const [authConfirmPassword, setAuthConfirmPassword] = useState<string>("");
+  const [authMessage, setAuthMessage] = useState<string>("");
+  const [authBusy, setAuthBusy] = useState<boolean>(false);
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -463,12 +474,21 @@ function App() {
     () => projectMembers.filter((member) => member.projectId === selectedProjectId),
     [projectMembers, selectedProjectId],
   );
+  const currentUser = useMemo(() => {
+    const email = authSession?.user?.email ?? CURRENT_USER.email;
+    const metadataName = String(authSession?.user?.user_metadata?.full_name ?? "").trim();
+    const fallbackName = email.toLowerCase() === OWNER_EMAIL ? "Andy Bird" : email.split("@")[0] || CURRENT_USER.name;
+    return {
+      name: metadataName || fallbackName,
+      email,
+    };
+  }, [authSession]);
   const currentProjectMember = useMemo(
     () =>
-      selectedProjectMembers.find((member) => member.email.toLowerCase() === CURRENT_USER.email.toLowerCase()) ??
+      selectedProjectMembers.find((member) => member.email.toLowerCase() === currentUser.email.toLowerCase()) ??
       selectedProjectMembers.find((member) => member.role === "Owner") ??
       null,
-    [selectedProjectMembers],
+    [selectedProjectMembers, currentUser.email],
   );
   const projectPermission = currentProjectMember?.permission ?? OWNER_PERMISSION;
   const filteredProjects = useMemo(
@@ -591,8 +611,8 @@ function App() {
         projects.map((project) => ({
           id: makeId(),
           projectId: project.id,
-          name: project.manager || CURRENT_USER.name,
-          email: CURRENT_USER.email,
+          name: project.manager || currentUser.name,
+          email: currentUser.email,
           role: "Owner",
           status: "active",
           dateAdded: new Date().toISOString(),
@@ -600,7 +620,7 @@ function App() {
         })),
       );
     }
-  }, [projects, folders.length, projectMembers.length]);
+  }, [projects, folders.length, projectMembers.length, currentUser.email, currentUser.name]);
 
   useEffect(() => {
     if (projects.length === 0) return;
@@ -637,6 +657,45 @@ function App() {
       setActiveModule("operations");
     }
   }, [opsPathname, projectEditorContext]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !supabase) {
+      setAuthInitializing(false);
+      return;
+    }
+    let mounted = true;
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setAuthSession(data.session);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setAuthSession(null);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setAuthInitializing(false);
+      });
+
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthSession(session);
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthMode("reset");
+        setAuthMessage("Set your new password to finish account recovery.");
+      }
+      if (event === "SIGNED_OUT") {
+        setAuthMode("login");
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+      }
+    });
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (activeModule !== "operations") return;
@@ -703,6 +762,7 @@ function App() {
 
   useEffect(() => {
     async function loadOpsData(): Promise<void> {
+      if (!authSession) return;
       if (hasSupabaseConfig && supabase) {
         setOpsLoading(true);
         try {
@@ -744,7 +804,7 @@ function App() {
             name: row.name,
             status: row.status,
             updatedAt: row.updated_at,
-            uploadedBy: "Current User",
+            uploadedBy: currentUser.name,
             version: 1,
           }));
           setWorkers(loadedWorkers);
@@ -792,7 +852,7 @@ function App() {
                 ...file,
                 projectId: (file as ProjectFile).projectId ?? selectedProjectId ?? DEFAULT_PROJECTS[0].id,
                 version: (file as ProjectFile).version ?? 1,
-                uploadedBy: (file as ProjectFile).uploadedBy ?? "Current User",
+                uploadedBy: (file as ProjectFile).uploadedBy ?? currentUser.name,
               }))
             : [],
         );
@@ -805,9 +865,10 @@ function App() {
     }
 
     void loadOpsData();
-  }, []);
+  }, [authSession, currentUser.name, selectedProjectId]);
 
   useEffect(() => {
+    if (!authSession) return;
     if (hasSupabaseConfig && supabase) return;
     try {
       window.localStorage.setItem(
@@ -829,7 +890,7 @@ function App() {
         notify(`Local storage is full. Uploaded files still exist in this session only. (${getErrorMessage(error)})`);
       }
     }
-  }, [workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
+  }, [authSession, workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1948,7 +2009,7 @@ function App() {
     const entry: ProjectActivity = {
       id: makeId(),
       projectId,
-      user: CURRENT_USER.name,
+      user: currentUser.name,
       action,
       item,
       at: new Date().toISOString(),
@@ -1990,7 +2051,7 @@ function App() {
       name,
       code: newProjectCode.trim() || slug.slice(0, 3).toUpperCase(),
       client: newProjectClient.trim() || "Client",
-      manager: newProjectManager.trim() || CURRENT_USER.name,
+      manager: newProjectManager.trim() || currentUser.name,
       status: newProjectStatus,
       address: newProjectAddress.trim() || opsLocationName,
       startDate: newProjectStart || new Date().toISOString().slice(0, 10),
@@ -2002,8 +2063,8 @@ function App() {
       {
         id: makeId(),
         projectId: project.id,
-        name: newProjectManager.trim() || CURRENT_USER.name,
-        email: CURRENT_USER.email,
+        name: newProjectManager.trim() || currentUser.name,
+        email: currentUser.email,
         role: "Owner",
         status: "active",
         dateAdded: new Date().toISOString(),
@@ -2019,7 +2080,7 @@ function App() {
     setNewProjectAddress("");
     setNewProjectStart("");
     setNewProjectTarget("");
-    setNewProjectManager(CURRENT_USER.name);
+    setNewProjectManager(currentUser.name);
     setNewProjectDescription("");
     setNewProjectStatus("active");
     setShowNewProjectModal(false);
@@ -2073,7 +2134,7 @@ function App() {
         version: currentVersion,
         dataUrl: replaceTarget.dataUrl,
         fileSize: override?.fileSize,
-        uploadedBy: replaceTarget.uploadedBy ?? CURRENT_USER.name,
+        uploadedBy: replaceTarget.uploadedBy ?? currentUser.name,
         uploadedAt: replaceTarget.updatedAt,
         changeNote: override?.changeNote ?? "Superseded by new version",
       };
@@ -2087,7 +2148,7 @@ function App() {
                 mimeType: override?.mimeType ?? file.mimeType,
                 dataUrl: override?.dataUrl ?? file.dataUrl,
                 updatedAt: new Date().toISOString(),
-                uploadedBy: override?.uploadedBy ?? CURRENT_USER.name,
+                uploadedBy: override?.uploadedBy ?? currentUser.name,
                 version: currentVersion + 1,
                 status: "Current",
               }
@@ -2123,7 +2184,7 @@ function App() {
           updatedAt: data.updated_at,
           mimeType: override?.mimeType,
           dataUrl: override?.dataUrl,
-          uploadedBy: override?.uploadedBy ?? "Current User",
+          uploadedBy: override?.uploadedBy ?? currentUser.name,
           version: 1,
         };
         setProjectFiles((prev) => [file, ...prev]);
@@ -2140,7 +2201,7 @@ function App() {
           status: "Draft",
           mimeType: override?.mimeType,
           dataUrl: override?.dataUrl,
-          uploadedBy: override?.uploadedBy ?? CURRENT_USER.name,
+          uploadedBy: override?.uploadedBy ?? currentUser.name,
           version: 1,
         };
         setProjectFiles((prev) => [fallbackFile, ...prev]);
@@ -2164,7 +2225,7 @@ function App() {
       status: "Draft",
       mimeType: override?.mimeType,
       dataUrl: override?.dataUrl,
-      uploadedBy: override?.uploadedBy ?? "Current User",
+      uploadedBy: override?.uploadedBy ?? currentUser.name,
       version: 1,
     };
     setProjectFiles((prev) => [file, ...prev]);
@@ -2206,7 +2267,7 @@ function App() {
               name: file.name,
               mimeType: file.type || "application/octet-stream",
               dataUrl,
-              uploadedBy: CURRENT_USER.name,
+              uploadedBy: currentUser.name,
               fileSize: file.size,
               replaceFileId: existing.id,
               changeNote: "Uploaded from files workspace",
@@ -2222,7 +2283,7 @@ function App() {
           name: file.name,
           mimeType: file.type || "application/octet-stream",
           dataUrl,
-          uploadedBy: CURRENT_USER.name,
+          uploadedBy: currentUser.name,
           fileSize: file.size,
         });
         uploadedCount += 1;
@@ -2380,7 +2441,7 @@ function App() {
         projectId: projectEditorContext.projectId,
         version: currentVersion,
         dataUrl: target.dataUrl,
-        uploadedBy: target.uploadedBy ?? CURRENT_USER.name,
+        uploadedBy: target.uploadedBy ?? currentUser.name,
         uploadedAt: target.updatedAt,
         changeNote: "Before markup save from full editor",
       },
@@ -2399,7 +2460,7 @@ function App() {
                 schemaVersion: 1,
                 annotations,
               },
-              uploadedBy: CURRENT_USER.name,
+              uploadedBy: currentUser.name,
             }
           : item,
       ),
@@ -2437,6 +2498,103 @@ function App() {
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
     downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `timesheet-${scope}.csv`);
     notify(`Timesheet ${scope.toUpperCase()} CSV exported.`);
+  }
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!supabase || !hasSupabaseConfig) {
+      setAuthMessage("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      return;
+    }
+    const email = authEmail.trim().toLowerCase();
+    if (!email) {
+      setAuthMessage("Enter your email address.");
+      return;
+    }
+
+    if (authMode === "forgot") {
+      setAuthBusy(true);
+      setAuthMessage("");
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/`,
+        });
+        if (error) throw error;
+        setAuthMessage("Password reset link sent. Check your email inbox.");
+      } catch (error) {
+        setAuthMessage(`Password reset failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setAuthBusy(false);
+      }
+      return;
+    }
+
+    if (authPassword.length < 8) {
+      setAuthMessage("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (authMode === "signup" || authMode === "reset") {
+      if (authPassword !== authConfirmPassword) {
+        setAuthMessage("Passwords do not match.");
+        return;
+      }
+    }
+
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      if (authMode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
+        if (error) throw error;
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        return;
+      }
+
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: authPassword,
+          options: {
+            data: {
+              full_name: email === OWNER_EMAIL ? "Andy Bird" : undefined,
+            },
+          },
+        });
+        if (error) throw error;
+        if (!data.session) {
+          setAuthMessage("Account created. Check your email to confirm before signing in.");
+          setAuthMode("login");
+        } else {
+          setAuthMessage("Account created and signed in.");
+        }
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({ password: authPassword });
+      if (error) throw error;
+      setAuthMessage("Password updated. You are now signed in.");
+      setAuthMode("login");
+      setAuthPassword("");
+      setAuthConfirmPassword("");
+    } catch (error) {
+      setAuthMessage(`Authentication failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleSignOut(): Promise<void> {
+    if (!supabase || !hasSupabaseConfig) return;
+    setAuthBusy(true);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   function navigateOps(path: string): void {
@@ -3043,7 +3201,7 @@ function App() {
           name: saveAsName.toLowerCase().endsWith(".pdf") ? saveAsName : `${saveAsName}.pdf`,
           mimeType: "application/pdf",
           dataUrl: `data:application/pdf;base64,${bytesToBase64(bytes)}`,
-          uploadedBy: CURRENT_USER.name,
+          uploadedBy: currentUser.name,
           fileSize: bytes.byteLength,
         });
         notify("Saved As new project PDF.");
@@ -4053,7 +4211,7 @@ function App() {
                         <strong>{file.name}</strong>
                         <small>
                           Version {file.version ?? 1} • {file.mimeType ?? "Unknown"} • Updated{" "}
-                          {new Date(file.updatedAt).toLocaleDateString()} • By {file.uploadedBy ?? CURRENT_USER.name}
+                          {new Date(file.updatedAt).toLocaleDateString()} • By {file.uploadedBy ?? currentUser.name}
                         </small>
                       </button>
                       <div className="opsInline opsFileRowActions">
@@ -4569,7 +4727,7 @@ function App() {
             </div>
             <div className="opsHeaderMeta">
               <span>{new Date().toLocaleDateString()}</span>
-              <span>{CURRENT_USER.name}</span>
+              <span>{currentUser.name}</span>
             </div>
           </header>
           <section className="opsPageContent">{content}</section>
@@ -4586,7 +4744,141 @@ function App() {
     );
   }
 
+  function renderAuthGate(): ReactElement {
+    if (!hasSupabaseConfig || !supabase) {
+      return (
+        <main className="authGate">
+          <section className="authCard">
+            <h2>Authentication setup required</h2>
+            <p>Add Supabase environment variables to enable secure sign-in:</p>
+            <ul>
+              <li>VITE_SUPABASE_URL</li>
+              <li>VITE_SUPABASE_ANON_KEY</li>
+            </ul>
+          </section>
+        </main>
+      );
+    }
+
+    if (authInitializing) {
+      return (
+        <main className="authGate">
+          <section className="authCard">
+            <h2>Checking session…</h2>
+            <p>Please wait while we verify your account.</p>
+          </section>
+        </main>
+      );
+    }
+
+    const titleMap: Record<AuthMode, string> = {
+      login: "Sign in to MEP OPS",
+      signup: "Create your account",
+      forgot: "Reset your password",
+      reset: "Set a new password",
+    };
+
+    const submitLabel: Record<AuthMode, string> = {
+      login: "Sign In",
+      signup: "Create Account",
+      forgot: "Send Reset Link",
+      reset: "Update Password",
+    };
+
+    return (
+      <main className="authGate">
+        <section className="authCard">
+          <h2>{titleMap[authMode]}</h2>
+          <p className="authHint">
+            First owner account: <strong>{OWNER_EMAIL}</strong>. Use Sign Up on first access, then sign in normally.
+          </p>
+          <form className="authForm" onSubmit={(event) => void handleAuthSubmit(event)}>
+            <label>
+              Email
+              <input
+                type="email"
+                value={authEmail}
+                autoComplete="email"
+                onChange={(event) => setAuthEmail(event.target.value)}
+                placeholder={OWNER_EMAIL}
+                required
+              />
+            </label>
+            {authMode !== "forgot" ? (
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={authPassword}
+                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  required
+                />
+              </label>
+            ) : null}
+            {authMode === "signup" || authMode === "reset" ? (
+              <label>
+                Confirm password
+                <input
+                  type="password"
+                  value={authConfirmPassword}
+                  autoComplete="new-password"
+                  onChange={(event) => setAuthConfirmPassword(event.target.value)}
+                  required
+                />
+              </label>
+            ) : null}
+            {authMessage ? <p className="authMessage">{authMessage}</p> : null}
+            <button type="submit" disabled={authBusy}>
+              {authBusy ? "Please wait..." : submitLabel[authMode]}
+            </button>
+          </form>
+
+          <div className="authSwitches">
+            {authMode !== "login" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthMessage("");
+                }}
+              >
+                Back to sign in
+              </button>
+            ) : null}
+            {authMode !== "signup" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("signup");
+                  setAuthMessage("");
+                }}
+              >
+                Create account
+              </button>
+            ) : null}
+            {authMode !== "forgot" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("forgot");
+                  setAuthMessage("");
+                }}
+              >
+                Forgot password
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const pages = Array.from({ length: pageCount }, (_, idx) => idx + 1);
+
+  if (!authSession) {
+    return renderAuthGate();
+  }
 
   return (
     <div className="app">
@@ -4607,6 +4899,9 @@ function App() {
             onClick={() => navigateOps("/sign-in")}
           >
             Operations
+          </button>
+          <button type="button" onClick={() => void handleSignOut()} disabled={authBusy}>
+            {authBusy ? "Signing out..." : "Sign Out"}
           </button>
         </div>
       </header>
