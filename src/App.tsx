@@ -3853,6 +3853,14 @@ function App() {
       content = (
         <div className="opsSignOutGrid">
           <section className="opsPanel">
+            <div className="opsInline opsClockToggle">
+              <button type="button" onClick={() => navigateOps("/sign-in")}>
+                Clock In
+              </button>
+              <button type="button" className="active" onClick={() => navigateOps("/sign-out")}>
+                Clock Out
+              </button>
+            </div>
             <h3>Project and location</h3>
             <div className="opsFields">
               <label>
@@ -4055,15 +4063,33 @@ function App() {
                         navigateOps(`/projects/${project.slug}/files`);
                       }}
                     >
-                      <span>{project.name}</span>
-                      <span>{project.client}</span>
-                      <span>{project.code}</span>
-                      <span>{project.address}</span>
-                      <span>{project.manager}</span>
-                      <span>{project.status}</span>
-                      <span>{lastActivity ? new Date(lastActivity.at).toLocaleString() : "-"}</span>
-                      <span>{filesCount}</span>
-                      <span>{teamCount}</span>
+                      <span className="opsProjectCell opsProjectCellProject" data-label="Project">
+                        {project.name}
+                      </span>
+                      <span className="opsProjectCell" data-label="Client">
+                        {project.client}
+                      </span>
+                      <span className="opsProjectCell" data-label="Code">
+                        {project.code}
+                      </span>
+                      <span className="opsProjectCell" data-label="Address">
+                        {project.address}
+                      </span>
+                      <span className="opsProjectCell" data-label="Manager">
+                        {project.manager}
+                      </span>
+                      <span className="opsProjectCell" data-label="Status">
+                        {project.status}
+                      </span>
+                      <span className="opsProjectCell" data-label="Last activity">
+                        {lastActivity ? new Date(lastActivity.at).toLocaleString() : "-"}
+                      </span>
+                      <span className="opsProjectCell" data-label="Files">
+                        {filesCount}
+                      </span>
+                      <span className="opsProjectCell" data-label="Team">
+                        {teamCount}
+                      </span>
                     </button>
                   );
                 })}
@@ -4746,6 +4772,14 @@ function App() {
       content = (
         <div className="opsSignInGrid">
           <section className="opsPanel opsFields">
+            <div className="opsInline opsClockToggle">
+              <button type="button" className="active" onClick={() => navigateOps("/sign-in")}>
+                Clock In
+              </button>
+              <button type="button" onClick={() => navigateOps("/sign-out")}>
+                Clock Out
+              </button>
+            </div>
             <label>
               Project selector
               <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>

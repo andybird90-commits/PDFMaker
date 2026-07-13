@@ -931,6 +931,14 @@ label {
   margin-top: 0.35rem;
 }
 
+.opsProjectCell {
+  min-width: 0;
+}
+
+.opsClockToggle {
+  margin-bottom: 0.35rem;
+}
+
 .opsModalBackdrop {
   position: fixed;
   inset: 0;
@@ -1087,10 +1095,39 @@ label {
   gap: 0.75rem;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1099px) {
   .opsProjectTableHead {
     display: none;
   }
+  .opsProjectTableRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+  .opsProjectCell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    border: 1px solid #2b425e;
+    border-radius: 7px;
+    background: rgba(15, 23, 42, 0.35);
+    padding: 0.35rem 0.45rem;
+    font-size: 0.79rem;
+  }
+  .opsProjectCell::before {
+    content: attr(data-label);
+    color: #97abc4;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .opsProjectCellProject {
+    grid-column: 1 / -1;
+    font-weight: 700;
+  }
+}
+
+@media (max-width: 767px) {
   .opsProjectTableRow {
     grid-template-columns: 1fr;
   }
