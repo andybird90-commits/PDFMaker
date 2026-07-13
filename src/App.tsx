@@ -284,6 +284,7 @@ function isOpsPath(pathname: string): boolean {
 
 function parseOpsRoute(pathname: string): OpsRoute {
   if (pathname === "/" || pathname === "/home") return { name: "home" };
+  if (pathname === "/sign-in") return { name: "sign-in" };
   if (pathname === "/sign-out") return { name: "sign-out" };
   if (pathname === "/timesheets") return { name: "timesheets" };
   if (pathname.startsWith("/timesheets/")) return { name: "timesheets", date: pathname.split("/")[2] };
