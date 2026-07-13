@@ -713,6 +713,23 @@ label {
   min-height: 34px;
 }
 
+.opsFields textarea {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid rgba(74, 105, 141, 0.52);
+  background: rgba(23, 38, 60, 0.7);
+  border-radius: 8px;
+  color: #e5e7eb;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.opsFields input[type="checkbox"] {
+  width: 18px;
+  min-height: 18px;
+  justify-self: start;
+}
+
 .opsAppRoot button {
   border-color: rgba(88, 118, 153, 0.6);
   border-radius: 8px;
@@ -809,6 +826,30 @@ label {
 .opsLandingTile span {
   color: #9fb2cd;
   font-size: 0.82rem;
+}
+
+.opsFormLogoPreview {
+  width: 170px;
+  max-height: 70px;
+  object-fit: contain;
+  border: 1px solid rgba(78, 109, 146, 0.5);
+  border-radius: 8px;
+  background: rgba(10, 20, 35, 0.7);
+  padding: 0.35rem;
+}
+
+.opsCommissioningEditor {
+  grid-column: 1 / -1;
+}
+
+.opsCommissioningSection {
+  margin-top: 0.65rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(66, 98, 134, 0.45);
+}
+
+.opsCommissioningSection h4 {
+  margin: 0 0 0.45rem;
 }
 
 .opsTable {

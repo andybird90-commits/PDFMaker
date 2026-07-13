@@ -133,6 +133,28 @@ type FormTemplate = {
   fileName: string;
   assetPath: string;
 };
+type CommissioningFieldType = "text" | "textarea" | "date" | "number" | "checkbox";
+type CommissioningField = {
+  id: string;
+  label: string;
+  type: CommissioningFieldType;
+  placeholder?: string;
+};
+type CommissioningSection = {
+  id: string;
+  title: string;
+  fields: CommissioningField[];
+};
+type CommissioningSubmission = {
+  id: string;
+  projectId: string;
+  templateId: string;
+  templateName: string;
+  values: Record<string, string>;
+  status: "draft" | "completed";
+  updatedAt: string;
+  createdBy: string;
+};
 type GpsSnapshot = {
   lat: number;
   lng: number;
@@ -234,6 +256,155 @@ const FORM_TEMPLATES: FormTemplate[] = [
     assetPath: "/Job_Name_-_Area_-_LAC_-_40_FCU_Commissioning_VRF_4129.pdf",
   },
 ];
+
+function buildFcuCommissioningSections(count: number): CommissioningSection[] {
+  return [
+    {
+      id: "system-details",
+      title: "System Details",
+      fields: [
+        { id: "project", label: "Project", type: "text" },
+        { id: "area", label: "Area", type: "text" },
+        { id: "lac-ref", label: "LAC Reference", type: "text" },
+        { id: "engineer", label: "Commissioning Engineer", type: "text" },
+        { id: "test-date", label: "Date of Test", type: "date" },
+      ],
+    },
+    {
+      id: "condenser-and-refrigerant",
+      title: "Condenser / Refrigerant",
+      fields: [
+        { id: "condenser-model", label: "Condenser Model", type: "text" },
+        { id: "condenser-serial", label: "Condenser Serial", type: "text" },
+        { id: "system-refrigerant", label: "System Refrigerant", type: "text" },
+        { id: "manufacturer-charge-kg", label: "Manufacturer Charge (kg)", type: "number" },
+        { id: "additional-charge-kg", label: "Additional Charge (kg)", type: "number" },
+      ],
+    },
+    {
+      id: "fcu-readings",
+      title: `FCU Readings (${count} units)`,
+      fields: [
+        { id: "fcu-summary", label: "FCU Readings Summary", type: "textarea", placeholder: "Enter per-unit FCU readings and notes" },
+        { id: "fcu-checklist", label: "FCU Checklist Summary", type: "textarea", placeholder: "Filter condition, condensate type, fresh air checks" },
+      ],
+    },
+    {
+      id: "pressure-vacuum-drain",
+      title: "Pressure / Vacuum / Drain Tests",
+      fields: [
+        { id: "strength-test-bar", label: "Strength Test (bar)", type: "number" },
+        { id: "leak-test-bar", label: "Leak Test (bar)", type: "number" },
+        { id: "vacuum-test-torr", label: "Vacuum Test (torr)", type: "number" },
+        { id: "drain-test-complete", label: "Drain Test Complete", type: "checkbox" },
+      ],
+    },
+    {
+      id: "handover",
+      title: "Handover",
+      fields: [
+        { id: "controller-model-serial", label: "Controller Model / Serial", type: "text" },
+        { id: "bms-interface-complete", label: "BMS Interface Complete", type: "checkbox" },
+        { id: "fire-interface-complete", label: "Fire Alarm Interface Complete", type: "checkbox" },
+        { id: "handover-comments", label: "Handover Comments", type: "textarea" },
+      ],
+    },
+  ];
+}
+
+const COMMISSIONING_TEMPLATE_SECTIONS: Record<string, CommissioningSection[]> = {
+  "split-commissioning": [
+    {
+      id: "system-details",
+      title: "System Details",
+      fields: [
+        { id: "project", label: "Project", type: "text" },
+        { id: "area", label: "Area", type: "text" },
+        { id: "lac-ref", label: "LAC Reference", type: "text" },
+        { id: "customer", label: "Customer", type: "text" },
+        { id: "test-engineer", label: "Test Engineer", type: "text" },
+        { id: "test-date", label: "Date of Test", type: "date" },
+      ],
+    },
+    {
+      id: "condenser",
+      title: "Condenser & Refrigerant",
+      fields: [
+        { id: "condenser-model", label: "Condenser Model", type: "text" },
+        { id: "condenser-serial", label: "Condenser Serial", type: "text" },
+        { id: "system-refrigerant", label: "System Refrigerant", type: "text" },
+        { id: "manufacturer-charge-kg", label: "Manufacturer Charge (kg)", type: "number" },
+        { id: "additional-charge-kg", label: "Additional Charge (kg)", type: "number" },
+      ],
+    },
+    {
+      id: "test-certificates",
+      title: "Test Certificates",
+      fields: [
+        { id: "strength-test-bar", label: "Strength Test (bar)", type: "number" },
+        { id: "leak-test-bar", label: "Leak Test (bar)", type: "number" },
+        { id: "vacuum-test-torr", label: "Vacuum Test (torr)", type: "number" },
+        { id: "drain-test-complete", label: "Drain Test Complete", type: "checkbox" },
+      ],
+    },
+    {
+      id: "handover",
+      title: "Handover Information",
+      fields: [
+        { id: "controller-model-serial", label: "Central Controller Model / Serial", type: "text" },
+        { id: "time-schedule-set", label: "Time Schedule Set", type: "checkbox" },
+        { id: "bms-interface-complete", label: "BMS Interface Complete", type: "checkbox" },
+        { id: "fire-interface-complete", label: "Fire Alarm Interface Complete", type: "checkbox" },
+        { id: "handover-comments", label: "Comments", type: "textarea" },
+      ],
+    },
+  ],
+  "hvrf-log-book": [
+    {
+      id: "contractor-site",
+      title: "Contractor & Site Details",
+      fields: [
+        { id: "project", label: "Project", type: "text" },
+        { id: "site-address", label: "Site Address", type: "text" },
+        { id: "installation-contractor", label: "Installation Contractor", type: "text" },
+        { id: "commissioning-engineer", label: "Commissioning Engineer", type: "text" },
+        { id: "test-date", label: "Date", type: "date" },
+      ],
+    },
+    {
+      id: "outdoor-system",
+      title: "Outdoor System Details",
+      fields: [
+        { id: "outdoor-location", label: "Outdoor Location", type: "text" },
+        { id: "system-reference", label: "System Reference", type: "text" },
+        { id: "system-model", label: "System Model", type: "text" },
+        { id: "outdoor-serial", label: "Outdoor Unit Serial", type: "text" },
+      ],
+    },
+    {
+      id: "hbc-and-pipework",
+      title: "HBC / Pipework",
+      fields: [
+        { id: "hbc-main-model", label: "HBC Controller Main Model", type: "text" },
+        { id: "hbc-main-serial", label: "HBC Controller Main Serial", type: "text" },
+        { id: "pipework-summary", label: "Pipework Summary", type: "textarea", placeholder: "Diameter, length, type and charge calculations" },
+      ],
+    },
+    {
+      id: "readings-and-handover",
+      title: "Readings & Handover",
+      fields: [
+        { id: "operating-readings", label: "Operating Readings Summary", type: "textarea" },
+        { id: "controller-password", label: "Controller Password", type: "text" },
+        { id: "handover-comments", label: "Comments", type: "textarea" },
+      ],
+    },
+  ],
+  "10-fcu-commissioning-vrf": buildFcuCommissioningSections(10),
+  "20-fcu-commissioning-vrf": buildFcuCommissioningSections(20),
+  "30-fcu-commissioning-vrf": buildFcuCommissioningSections(30),
+  "40-fcu-commissioning-vrf": buildFcuCommissioningSections(40),
+};
 const DEFAULT_PROJECTS: Project[] = [
   {
     id: "proj-1",
@@ -431,6 +602,10 @@ function App() {
   const [fileSearch, setFileSearch] = useState<string>("");
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
+  const [commissioningSubmissions, setCommissioningSubmissions] = useState<CommissioningSubmission[]>([]);
+  const [activeCommissioningSubmissionId, setActiveCommissioningSubmissionId] = useState<string | null>(null);
+  const [activeCommissioningValues, setActiveCommissioningValues] = useState<Record<string, string>>({});
+  const [companyLogoDataUrl, setCompanyLogoDataUrl] = useState<string>("");
   const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/home");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
@@ -454,6 +629,7 @@ function App() {
   const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
   const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
   const opsStorageWarnedRef = useRef<boolean>(false);
+  const logoUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -597,6 +773,10 @@ function App() {
   const selectedFileVersions = useMemo(
     () => projectFileVersions.filter((version) => version.fileId === (versionHistoryFileId ?? selectedProjectFileId)),
     [projectFileVersions, selectedProjectFileId, versionHistoryFileId],
+  );
+  const activeCommissioningSubmission = useMemo(
+    () => commissioningSubmissions.find((item) => item.id === activeCommissioningSubmissionId) ?? null,
+    [commissioningSubmissions, activeCommissioningSubmissionId],
   );
   const opsRoute = useMemo(() => parseOpsRoute(opsPathname), [opsPathname]);
   const timeSummary = useMemo(() => {
@@ -872,6 +1052,8 @@ function App() {
           projectFileVersions?: ProjectFileVersion[];
           folders?: FolderNode[];
           projectFiles?: ProjectFile[];
+          commissioningSubmissions?: CommissioningSubmission[];
+          companyLogoDataUrl?: string;
         };
         setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
         setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
@@ -896,6 +1078,8 @@ function App() {
               }))
             : [],
         );
+        setCommissioningSubmissions(Array.isArray(parsed.commissioningSubmissions) ? parsed.commissioningSubmissions : []);
+        setCompanyLogoDataUrl(typeof parsed.companyLogoDataUrl === "string" ? parsed.companyLogoDataUrl : "");
         if (loadedFolders.length > 0) {
           setSelectedFolderId(loadedFolders[0].id);
         }
@@ -922,6 +1106,8 @@ function App() {
           projectFileVersions,
           folders,
           projectFiles,
+          commissioningSubmissions,
+          companyLogoDataUrl,
         }),
       );
     } catch (error) {
@@ -930,7 +1116,19 @@ function App() {
         notify(`Local storage is full. Uploaded files still exist in this session only. (${getErrorMessage(error)})`);
       }
     }
-  }, [authSession, workers, timeEntries, projects, projectMembers, projectActivities, projectFileVersions, folders, projectFiles]);
+  }, [
+    authSession,
+    workers,
+    timeEntries,
+    projects,
+    projectMembers,
+    projectActivities,
+    projectFileVersions,
+    folders,
+    projectFiles,
+    commissioningSubmissions,
+    companyLogoDataUrl,
+  ]);
 
   useEffect(() => {
     if (!authSession || !authWorkerId) return;
@@ -2332,6 +2530,67 @@ function App() {
     }
   }
 
+  function getTemplateSections(templateId: string): CommissioningSection[] {
+    return COMMISSIONING_TEMPLATE_SECTIONS[templateId] ?? [];
+  }
+
+  function buildInitialCommissioningValues(template: FormTemplate): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const section of getTemplateSections(template.id)) {
+      for (const field of section.fields) {
+        values[field.id] = "";
+      }
+    }
+    values.project = selectedProject?.name ?? "";
+    values["site-address"] = selectedProject?.address ?? "";
+    values["lac-ref"] = selectedProject?.code ?? "";
+    values["test-engineer"] = currentUser.name;
+    values["commissioning-engineer"] = currentUser.name;
+    values["test-date"] = new Date().toISOString().slice(0, 10);
+    return values;
+  }
+
+  function openCommissioningSubmission(submission: CommissioningSubmission): void {
+    setActiveCommissioningSubmissionId(submission.id);
+    setActiveFormId(submission.templateId);
+    setActiveCommissioningValues(submission.values);
+  }
+
+  function saveCommissioningSubmission(status: "draft" | "completed" = "draft"): CommissioningSubmission | null {
+    if (!activeCommissioningSubmissionId || !activeFormId) {
+      notify("Start a commissioning form first.");
+      return null;
+    }
+    const template = FORM_TEMPLATES.find((item) => item.id === activeFormId);
+    if (!template) {
+      notify("Template not found.");
+      return null;
+    }
+    const submission: CommissioningSubmission = {
+      id: activeCommissioningSubmissionId,
+      projectId: selectedProjectId,
+      templateId: activeFormId,
+      templateName: template.name,
+      values: activeCommissioningValues,
+      status,
+      updatedAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+    };
+    setCommissioningSubmissions((prev) => {
+      const idx = prev.findIndex((item) => item.id === submission.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = submission;
+        return next;
+      }
+      return [submission, ...prev];
+    });
+    if (status === "completed") {
+      setCompletedFormIds((prev) => (prev.includes(activeFormId) ? prev : [...prev, activeFormId]));
+    }
+    return submission;
+  }
+
   async function downloadFormTemplate(template: FormTemplate): Promise<void> {
     try {
       const response = await fetch(template.assetPath);
@@ -2345,33 +2604,111 @@ function App() {
   }
 
   async function startProjectFormFromTemplate(template: FormTemplate): Promise<void> {
-    if (!selectedProject) {
-      notify("Select a project first.");
+    if (!selectedProject) return;
+    const submission: CommissioningSubmission = {
+      id: makeId(),
+      projectId: selectedProject.id,
+      templateId: template.id,
+      templateName: template.name,
+      values: buildInitialCommissioningValues(template),
+      status: "draft",
+      updatedAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+    };
+    setCommissioningSubmissions((prev) => [submission, ...prev]);
+    openCommissioningSubmission(submission);
+    notify(`Started ${template.name} form.`);
+  }
+
+  async function exportCommissioningSubmission(submission: CommissioningSubmission): Promise<void> {
+    const template = FORM_TEMPLATES.find((item) => item.id === submission.templateId);
+    if (!template) {
+      notify("Template not found.");
       return;
     }
-    if (!projectPermission.uploadFiles) {
-      notify("You do not have permission to create forms.");
+
+    const pdf = await PDFDocument.create();
+    let page = pdf.addPage([842, 595]);
+    let y = 560;
+    const marginX = 34;
+
+    page.drawRectangle({ x: marginX - 8, y: 518, width: 782, height: 52, color: rgb(0.06, 0.16, 0.31) });
+    page.drawText("London AC Ltd - Commissioning Form", { x: marginX + 8, y: 548, size: 13, color: rgb(1, 1, 1) });
+    page.drawText(template.name, { x: marginX + 8, y: 531, size: 11, color: rgb(0.85, 0.91, 1) });
+    page.drawText(`Project: ${selectedProject?.name ?? submission.values.project ?? "-"}`, {
+      x: 520,
+      y: 548,
+      size: 9,
+      color: rgb(0.95, 0.97, 1),
+    });
+    page.drawText(`Date: ${new Date(submission.updatedAt).toLocaleDateString()}`, { x: 520, y: 534, size: 9, color: rgb(0.95, 0.97, 1) });
+
+    if (companyLogoDataUrl.startsWith("data:image/")) {
+      try {
+        const logoBytes = dataUrlToBytes(companyLogoDataUrl);
+        const logoImage = companyLogoDataUrl.includes("image/png") ? await pdf.embedPng(logoBytes) : await pdf.embedJpg(logoBytes);
+        const scaled = logoImage.scale(0.22);
+        page.drawImage(logoImage, {
+          x: 728 - scaled.width,
+          y: 526,
+          width: scaled.width,
+          height: scaled.height,
+        });
+      } catch {
+        // Ignore logo parsing errors and continue export.
+      }
+    }
+
+    for (const section of getTemplateSections(submission.templateId)) {
+      if (y < 70) {
+        page = pdf.addPage([842, 595]);
+        y = 560;
+      }
+      page.drawRectangle({ x: marginX - 4, y: y - 8, width: 782, height: 22, color: rgb(0.9, 0.94, 1) });
+      page.drawText(section.title, { x: marginX + 2, y, size: 10, color: rgb(0.06, 0.16, 0.31) });
+      y -= 24;
+      for (const field of section.fields) {
+        if (y < 34) {
+          page = pdf.addPage([842, 595]);
+          y = 560;
+        }
+        const rawValue = submission.values[field.id] ?? "";
+        const value = field.type === "checkbox" ? (rawValue === "true" ? "Yes" : "No") : rawValue || "-";
+        page.drawText(`${field.label}:`, { x: marginX, y, size: 9, color: rgb(0.78, 0.84, 0.93) });
+        page.drawText(String(value).slice(0, 110), { x: marginX + 250, y, size: 9, color: rgb(0.97, 0.99, 1) });
+        y -= 14;
+      }
+      y -= 8;
+    }
+
+    const bytes = await pdf.save();
+    const safeBytes = Uint8Array.from(bytes);
+    const exportName = makeUniqueProjectFileName(`${template.name} - Completed.pdf`, submission.projectId);
+    const formsFolderId = getProjectFormsFolderId(submission.projectId);
+    await addProjectFile({
+      name: exportName,
+      mimeType: "application/pdf",
+      dataUrl: `data:application/pdf;base64,${bytesToBase64(safeBytes)}`,
+      uploadedBy: currentUser.name,
+      fileSize: safeBytes.byteLength,
+      folderId: formsFolderId,
+    });
+    downloadBlob(new Blob([toArrayBuffer(safeBytes)], { type: "application/pdf" }), exportName);
+    notify(`Exported ${template.name}.`);
+  }
+
+  async function handleCompanyLogoUpload(file: File | null): Promise<void> {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      notify("Please choose an image file for the company logo.");
       return;
     }
     try {
-      const response = await fetch(template.assetPath);
-      if (!response.ok) throw new Error(`Template fetch failed (${response.status})`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      const formsFolderId = getProjectFormsFolderId(selectedProject.id);
-      const fileName = makeUniqueProjectFileName(template.fileName, selectedProject.id);
-      const createdFile = await addProjectFile({
-        name: fileName,
-        mimeType: "application/pdf",
-        dataUrl: `data:application/pdf;base64,${bytesToBase64(bytes)}`,
-        uploadedBy: currentUser.name,
-        fileSize: bytes.byteLength,
-        folderId: formsFolderId,
-      });
-      if (!createdFile) return;
-      logProjectActivity("form created", `${template.name} template`, selectedProject.id);
-      await openProjectFileFullView(createdFile, selectedProject.slug);
+      const dataUrl = await fileToDataUrl(file);
+      setCompanyLogoDataUrl(dataUrl);
+      notify("Company logo updated.");
     } catch (error) {
-      notify(`Could not create form from template: ${getErrorMessage(error)}`);
+      notify(`Logo upload failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -4311,6 +4648,11 @@ function App() {
             return FORM_TEMPLATES.some((template) => fileName === template.fileName.toLowerCase() || fileName.includes(template.id));
           })
           .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        const projectCommissioningSubmissions = commissioningSubmissions
+          .filter((item) => item.projectId === workspaceProjectId)
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        const activeTemplate = activeFormId ? FORM_TEMPLATES.find((template) => template.id === activeFormId) ?? null : null;
+        const activeTemplateSections = activeTemplate ? getTemplateSections(activeTemplate.id) : [];
         const projectTabItems: Array<{ id: typeof projectWorkspaceTab; label: string }> = [
           { id: "overview", label: "Overview" },
           { id: "files", label: "Files" },
@@ -4639,7 +4981,7 @@ function App() {
               <section className="opsPanel">
                 <h3>Summary</h3>
                 <p>Files: {projectFiles.filter((file) => file.projectId === workspaceProjectId).length}</p>
-                <p>Forms: {projectFormFiles.length}</p>
+                <p>Forms: {projectFormFiles.length + projectCommissioningSubmissions.length}</p>
                 <p>Timesheet hours: {formatMinutes(timeSummary.totalMinutes)}</p>
               </section>
             </div>
@@ -4679,6 +5021,27 @@ function App() {
               <section className="opsPanel">
                 <h3>Commissioning Templates</h3>
                 <p className="opsSubtle">Start a new project form from your common commissioning templates.</p>
+                <div className="opsInline">
+                  <button type="button" onClick={() => logoUploadInputRef.current?.click()}>
+                    {companyLogoDataUrl ? "Replace Company Logo" : "Upload Company Logo"}
+                  </button>
+                  {companyLogoDataUrl ? (
+                    <button type="button" onClick={() => setCompanyLogoDataUrl("")}>
+                      Remove Logo
+                    </button>
+                  ) : null}
+                  <input
+                    ref={logoUploadInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hiddenInput"
+                    onChange={(event) => {
+                      void handleCompanyLogoUpload(event.target.files?.[0] ?? null);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </div>
+                {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="opsFormLogoPreview" /> : null}
                 <div className="opsList">
                   {FORM_TEMPLATES.map((form) => (
                     <div key={form.id} className="opsListRow">
@@ -4702,30 +5065,119 @@ function App() {
               </section>
               <section className="opsPanel">
                 <h3>Project Form Register</h3>
-                <p className="opsSubtle">Open or export forms already created for this project.</p>
+                <p className="opsSubtle">Open/edit boxed forms and export branded PDFs.</p>
                 <div className="opsList">
-                  {projectFormFiles.map((formFile) => (
-                    <div key={formFile.id} className="opsListRow">
+                  {projectCommissioningSubmissions.map((submission) => (
+                    <div key={submission.id} className="opsListRow">
                       <div>
-                        <strong>{formFile.name}</strong>
+                        <strong>{submission.templateName}</strong>
                         <small>
-                          v{formFile.version ?? 1} • Updated {new Date(formFile.updatedAt).toLocaleString()}
+                          {submission.status === "completed" ? "Completed" : "Draft"} • Updated {new Date(submission.updatedAt).toLocaleString()}
                         </small>
-                        <small>{formFile.uploadedBy ?? currentUser.name}</small>
+                        <small>{submission.createdBy}</small>
                       </div>
                       <div className="opsInline">
-                        <button type="button" onClick={() => void openProjectFileFullView(formFile, workspaceProject?.slug ?? "project")}>
-                          Open in Editor
+                        <button
+                          type="button"
+                          onClick={() => {
+                            openCommissioningSubmission(submission);
+                          }}
+                        >
+                          Open Boxes
                         </button>
-                        <button type="button" onClick={() => downloadProjectFile(formFile)}>
+                        <button type="button" onClick={() => void exportCommissioningSubmission(submission)}>
                           Export PDF
                         </button>
                       </div>
                     </div>
                   ))}
-                  {projectFormFiles.length === 0 ? <p>No project forms created yet.</p> : null}
+                  {projectCommissioningSubmissions.length === 0 ? <p>No boxed project forms created yet.</p> : null}
                 </div>
               </section>
+              {activeTemplate && activeCommissioningSubmission ? (
+                <section className="opsPanel opsCommissioningEditor">
+                  <h3>{activeTemplate.name} - Boxed Form</h3>
+                  <p className="opsSubtle">Complete each box then save draft or export final branded PDF.</p>
+                  {activeTemplateSections.map((section) => (
+                    <div key={section.id} className="opsCommissioningSection">
+                      <h4>{section.title}</h4>
+                      <div className="opsFields">
+                        {section.fields.map((field) => (
+                          <label key={field.id}>
+                            {field.label}
+                            {field.type === "textarea" ? (
+                              <textarea
+                                value={activeCommissioningValues[field.id] ?? ""}
+                                placeholder={field.placeholder}
+                                onChange={(event) =>
+                                  setActiveCommissioningValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            ) : field.type === "checkbox" ? (
+                              <input
+                                type="checkbox"
+                                checked={activeCommissioningValues[field.id] === "true"}
+                                onChange={(event) =>
+                                  setActiveCommissioningValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: String(event.target.checked),
+                                  }))
+                                }
+                              />
+                            ) : (
+                              <input
+                                type={field.type}
+                                value={activeCommissioningValues[field.id] ?? ""}
+                                placeholder={field.placeholder}
+                                onChange={(event) =>
+                                  setActiveCommissioningValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="opsInline">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const saved = saveCommissioningSubmission("draft");
+                        if (saved) notify("Form draft saved.");
+                      }}
+                    >
+                      Save Draft
+                    </button>
+                    <button
+                      type="button"
+                      className="btnSuccess"
+                      onClick={() => {
+                        const saved = saveCommissioningSubmission("completed");
+                        if (saved) void exportCommissioningSubmission(saved);
+                      }}
+                    >
+                      Export Final PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveCommissioningSubmissionId(null);
+                        setActiveFormId(null);
+                        setActiveCommissioningValues({});
+                      }}
+                    >
+                      Close Form
+                    </button>
+                  </div>
+                </section>
+              ) : null}
             </div>
           );
         } else if (projectWorkspaceTab === "activity") {
