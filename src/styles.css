@@ -43,10 +43,11 @@ body {
 }
 
 .appBrandLogo {
-  width: 150px;
-  max-height: 42px;
+  width: 210px;
+  max-height: 62px;
   object-fit: contain;
   object-position: left;
+  margin-top: -2px;
 }
 
 .appShellHeader h1 {

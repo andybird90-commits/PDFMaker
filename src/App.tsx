@@ -2754,14 +2754,14 @@ function App() {
         const logoImage = companyLogoDataUrl.includes("image/png")
           ? await pdf.embedPng(logoBytes)
           : await pdf.embedJpg(logoBytes);
-        const maxLogoWidth = 116;
-        const maxLogoHeight = 38;
+        const maxLogoWidth = 170;
+        const maxLogoHeight = 58;
         const logoScale = Math.min(maxLogoWidth / logoImage.width, maxLogoHeight / logoImage.height);
         const width = logoImage.width * logoScale;
         const height = logoImage.height * logoScale;
         page.drawImage(logoImage, {
-          x: pageWidth - margin - width - 10,
-          y: pageHeight - margin - headerHeight + 18,
+          x: pageWidth - margin - width + 2,
+          y: pageHeight - margin - height + 2,
           width,
           height,
         });
