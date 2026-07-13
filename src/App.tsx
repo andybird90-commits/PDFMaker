@@ -433,15 +433,40 @@ const DEFAULT_PROJECTS: Project[] = [
     description: "Commercial fit-out and services package.",
   },
 ];
-const DEFAULT_PROJECT_FOLDERS = [
-  "01_Design Drawings",
-  "02_Specifications",
-  "03_Reports",
-  "04_Correspondence",
-  "05_Site Photos",
-  "06_Forms",
-  "07_Contracts",
-  "08_Models",
+type ProjectFolderTemplate = {
+  name: string;
+  children?: ProjectFolderTemplate[];
+};
+
+const DEFAULT_PROJECT_FOLDER_TEMPLATE: ProjectFolderTemplate[] = [
+  {
+    name: "01. Health and Safety",
+    children: ["01. Inductions", "02. RAMS", "03. Weekly Pack - Subby", "04. SHE Management Reports"].map((name) => ({
+      name,
+    })),
+  },
+  {
+    name: "02. Handover Documentation",
+    children: ["01. Drawings", "02. Schematics", "03. Tech Subs", "04. Spec"].map((name) => ({
+      name,
+    })),
+  },
+  {
+    name: "03. Marked Up Drawings - Bi-Weekly",
+  },
+  {
+    name: "04. Variation Substantiation - NO COST",
+    children: [
+      "VO01 - Common Brackets - Closed",
+      "VO02 - Additional supports",
+      "VO03 - Remove Mock up and Reinstall",
+      "VO04 - Level 2 Tray and pipe alterations",
+    ].map((name) => ({ name })),
+  },
+  {
+    name: "05. Commissioning Documentation",
+    children: [{ name: "System Ref -" }],
+  },
 ];
 const OWNER_PERMISSION: ProjectPermission = {
   viewFiles: true,
@@ -464,6 +489,26 @@ function makeId(): string {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildDefaultFoldersForProject(projectId: string): FolderNode[] {
+  const seededFolders: FolderNode[] = [];
+  const appendTemplate = (nodes: ProjectFolderTemplate[], parentId: string | null): void => {
+    for (const node of nodes) {
+      const id = makeId();
+      seededFolders.push({
+        id,
+        projectId,
+        name: node.name,
+        parentId,
+      });
+      if (node.children?.length) {
+        appendTemplate(node.children, id);
+      }
+    }
+  };
+  appendTemplate(DEFAULT_PROJECT_FOLDER_TEMPLATE, null);
+  return seededFolders;
 }
 
 function formatMinutes(totalMinutes: number): string {
@@ -818,14 +863,7 @@ function App() {
     if (folders.length === 0) {
       const seededFolders: FolderNode[] = [];
       for (const project of projects) {
-        for (const folderName of DEFAULT_PROJECT_FOLDERS) {
-          seededFolders.push({
-            id: makeId(),
-            projectId: project.id,
-            name: folderName,
-            parentId: null,
-          });
-        }
+        seededFolders.push(...buildDefaultFoldersForProject(project.id));
       }
       setFolders(seededFolders);
     }
@@ -2314,16 +2352,11 @@ function App() {
   }
 
   async function createDefaultProjectFolders(projectId: string): Promise<void> {
-    const records = DEFAULT_PROJECT_FOLDERS.map((name) => ({
-      id: makeId(),
-      projectId,
-      name,
-      parentId: null as string | null,
-    }));
+    const records = buildDefaultFoldersForProject(projectId);
     setFolders((prev) => [...records, ...prev]);
     if (hasSupabaseConfig && supabase) {
       for (const folder of records) {
-        await supabase.from("folders").insert({ name: folder.name, parent_id: null });
+        await supabase.from("folders").insert({ id: folder.id, name: folder.name, parent_id: folder.parentId });
       }
     }
   }
