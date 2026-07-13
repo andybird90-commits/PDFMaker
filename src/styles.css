@@ -1123,6 +1123,35 @@ label {
   flex-wrap: wrap;
 }
 
+.authDiagnostics {
+  border-top: 1px solid #2f4866;
+  padding-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.authDiagnosticsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.authDiagnosticsOutput {
+  margin: 0;
+  border: 1px solid #294661;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #cbd5e1;
+  padding: 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .opsFolderList {
   display: flex;
   flex-direction: column;

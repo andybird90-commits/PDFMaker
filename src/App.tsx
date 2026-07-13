@@ -401,6 +401,8 @@ function App() {
   const [authConfirmPassword, setAuthConfirmPassword] = useState<string>("");
   const [authMessage, setAuthMessage] = useState<string>("");
   const [authBusy, setAuthBusy] = useState<boolean>(false);
+  const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
+  const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -2594,6 +2596,88 @@ function App() {
       await supabase.auth.signOut();
     } finally {
       setAuthBusy(false);
+    }
+  }
+
+  async function runAuthDiagnostics(): Promise<void> {
+    const urlRaw = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+    const keyRaw = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
+    const lines: string[] = [];
+    lines.push(`Time: ${new Date().toISOString()}`);
+    lines.push(`Origin: ${window.location.origin}`);
+    lines.push(`Supabase URL present: ${urlRaw.length > 0 ? "yes" : "no"}`);
+    lines.push(`Supabase anon key present: ${keyRaw.length > 0 ? "yes" : "no"}`);
+    lines.push(`Supabase anon key length: ${keyRaw.length}`);
+    if (keyRaw.length > 12) {
+      lines.push(`Supabase anon key preview: ${keyRaw.slice(0, 12)}...${keyRaw.slice(-6)}`);
+    }
+
+    if (!urlRaw || !keyRaw) {
+      lines.push("Result: missing environment values.");
+      setAuthDiagnosticsOutput(lines.join("\n"));
+      return;
+    }
+
+    let normalizedUrl = "";
+    try {
+      normalizedUrl = new URL(urlRaw).toString().replace(/\/$/, "");
+      lines.push(`Supabase URL valid: yes (${normalizedUrl})`);
+    } catch (error) {
+      lines.push(`Supabase URL valid: no (${error instanceof Error ? error.message : String(error)})`);
+      setAuthDiagnosticsOutput(lines.join("\n"));
+      return;
+    }
+
+    setAuthDiagnosticsBusy(true);
+    try {
+      try {
+        const noKeyResponse = await fetch(`${normalizedUrl}/auth/v1/settings`, { method: "GET" });
+        lines.push(`GET /auth/v1/settings (no key): HTTP ${noKeyResponse.status}`);
+      } catch (error) {
+        lines.push(`GET /auth/v1/settings (no key): NETWORK ERROR (${error instanceof Error ? error.message : String(error)})`);
+      }
+
+      try {
+        const withKeyResponse = await fetch(`${normalizedUrl}/auth/v1/settings`, {
+          method: "GET",
+          headers: {
+            apikey: keyRaw,
+          },
+        });
+        lines.push(`GET /auth/v1/settings (with key): HTTP ${withKeyResponse.status}`);
+      } catch (error) {
+        lines.push(`GET /auth/v1/settings (with key): NETWORK ERROR (${error instanceof Error ? error.message : String(error)})`);
+      }
+
+      try {
+        const probeEmail = `diagnostic-${Date.now()}@example.invalid`;
+        const probeResponse = await fetch(`${normalizedUrl}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: {
+            apikey: keyRaw,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: probeEmail,
+            password: "not-a-real-password",
+          }),
+        });
+        lines.push(`POST /auth/v1/token probe: HTTP ${probeResponse.status}`);
+        let bodySnippet = "";
+        try {
+          bodySnippet = await probeResponse.text();
+        } catch {
+          bodySnippet = "";
+        }
+        if (bodySnippet) {
+          lines.push(`Probe response snippet: ${bodySnippet.slice(0, 220)}`);
+        }
+      } catch (error) {
+        lines.push(`POST /auth/v1/token probe: NETWORK ERROR (${error instanceof Error ? error.message : String(error)})`);
+      }
+    } finally {
+      setAuthDiagnosticsBusy(false);
+      setAuthDiagnosticsOutput(lines.join("\n"));
     }
   }
 
@@ -4869,6 +4953,16 @@ function App() {
               </button>
             ) : null}
           </div>
+          <section className="authDiagnostics">
+            <div className="authDiagnosticsHeader">
+              <strong>Connection test</strong>
+              <button type="button" onClick={() => void runAuthDiagnostics()} disabled={authDiagnosticsBusy}>
+                {authDiagnosticsBusy ? "Testing..." : "Run Auth Connection Test"}
+              </button>
+            </div>
+            <p className="authHint">Runs live checks against your Supabase Auth endpoint and shows exact status/error output.</p>
+            {authDiagnosticsOutput ? <pre className="authDiagnosticsOutput">{authDiagnosticsOutput}</pre> : null}
+          </section>
         </section>
       </main>
     );
