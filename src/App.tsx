@@ -5856,7 +5856,8 @@ function App() {
   return (
     <div className="app">
       <header className="appShellHeader">
-        <div>
+        <div className="appBrand">
+          {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="appBrandLogo" /> : null}
           <h1>MEP OPS Platform</h1>
           <p>Operational workspace with markup studio</p>
         </div>

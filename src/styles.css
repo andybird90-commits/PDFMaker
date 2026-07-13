@@ -36,6 +36,19 @@ body {
   background: #0f1723;
 }
 
+.appBrand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.appBrandLogo {
+  width: 150px;
+  max-height: 42px;
+  object-fit: contain;
+  object-position: left;
+}
+
 .appShellHeader h1 {
   margin: 0;
   font-size: 1rem;
