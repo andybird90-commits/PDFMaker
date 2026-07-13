@@ -458,7 +458,6 @@ const CURRENT_USER = {
   email: "andy.bird@rdmande.uk",
 };
 const OWNER_EMAIL = "andy.bird@rdmande.uk";
-const COMPANY_NAME = "LONDON AC LTD";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -5138,7 +5137,6 @@ function App() {
               <section className="opsPanel">
                 <h3>Commissioning Templates</h3>
                 <p className="opsSubtle">Start a new project form from your common commissioning templates.</p>
-                <div className="opsPermanentLogoNote">Permanent branding: {COMPANY_NAME}</div>
                 <div className="opsList">
                   {FORM_TEMPLATES.map((form) => (
                     <div key={form.id} className="opsListRow">
@@ -5347,7 +5345,6 @@ function App() {
           <section className="opsPanel opsCommissioningEditor">
             {editingTemplate && activeCommissioningSubmission ? (
               <>
-                <div className="opsPermanentLogoNote">Permanent branding: {COMPANY_NAME}</div>
                 {editingSections.map((section) => (
                   <div key={section.id} className="opsCommissioningSection">
                     <h4>{section.title}</h4>
@@ -5786,8 +5783,6 @@ function App() {
             <strong>LONDON</strong>
             <span>AC LTD</span>
           </div>
-          <h1>MEP OPS Platform</h1>
-          <p>Operational workspace with markup studio</p>
         </div>
         <div className="opsInline">
           {activeModule === "markup-studio" ? (
