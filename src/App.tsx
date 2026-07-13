@@ -608,7 +608,6 @@ function App() {
   const [companyLogoDataUrl, setCompanyLogoDataUrl] = useState<string>("");
   const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/home");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
-  const [activeFormStep, setActiveFormStep] = useState<number>(1);
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
   const [selectedProjectFileId, setSelectedProjectFileId] = useState<string | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Record<string, boolean>>({});
@@ -948,6 +947,45 @@ function App() {
     }
     setOpenFileNeedsSaveWarning(false);
   }, [opsRoute]);
+
+  useEffect(() => {
+    if (opsRoute.name !== "forms" || opsRoute.mode !== "fill" || !opsRoute.formId || !selectedProject) return;
+    const template = FORM_TEMPLATES.find((item) => item.id === opsRoute.formId);
+    if (!template) return;
+
+    const activeMatchesRoute =
+      activeCommissioningSubmission &&
+      activeCommissioningSubmission.projectId === selectedProject.id &&
+      activeCommissioningSubmission.templateId === template.id;
+    if (activeMatchesRoute) return;
+
+    const existing = commissioningSubmissions.find(
+      (item) => item.projectId === selectedProject.id && item.templateId === template.id,
+    );
+    if (existing) {
+      openCommissioningSubmission(existing);
+      return;
+    }
+
+    const created: CommissioningSubmission = {
+      id: makeId(),
+      projectId: selectedProject.id,
+      templateId: template.id,
+      templateName: template.name,
+      values: buildInitialCommissioningValues(template),
+      status: "draft",
+      updatedAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+    };
+    setCommissioningSubmissions((prev) => [created, ...prev]);
+    openCommissioningSubmission(created);
+  }, [
+    opsRoute,
+    selectedProject,
+    commissioningSubmissions,
+    activeCommissioningSubmission,
+    currentUser.name,
+  ]);
 
   useEffect(() => {
     if (activeModule === "markup-studio") return;
@@ -2618,6 +2656,7 @@ function App() {
     setCommissioningSubmissions((prev) => [submission, ...prev]);
     openCommissioningSubmission(submission);
     notify(`Started ${template.name} form.`);
+    navigateOps(`/forms/${template.id}/fill`);
   }
 
   async function exportCommissioningSubmission(submission: CommissioningSubmission): Promise<void> {
@@ -4281,8 +4320,6 @@ function App() {
     const route = opsRoute;
     const selectedWorker = authWorker;
     const availableForms = FORM_TEMPLATES.filter((form) => !completedFormIds.includes(form.id));
-    const currentFormId = route.name === "forms" ? route.formId : undefined;
-    const activeForm = FORM_TEMPLATES.find((form) => form.id === (currentFormId ?? activeFormId ?? "")) ?? null;
     const signedInWorkers = workers
       .map((worker) => ({
         worker,
@@ -5081,6 +5118,7 @@ function App() {
                           type="button"
                           onClick={() => {
                             openCommissioningSubmission(submission);
+                            navigateOps(`/forms/${submission.templateId}/fill`);
                           }}
                         >
                           Open Boxes
@@ -5241,80 +5279,111 @@ function App() {
       }
     } else if (route.name === "forms") {
       if (route.mode === "fill") {
-        pageTitle = activeForm ? `Form: ${activeForm.name}` : "Form Completion";
-        pageSubtitle = "Complete sections, save draft, submit and attach site records";
+        const editingTemplate = route.formId ? FORM_TEMPLATES.find((item) => item.id === route.formId) ?? null : null;
+        const editingSections = editingTemplate ? getTemplateSections(editingTemplate.id) : [];
+        pageTitle = editingTemplate ? `Form: ${editingTemplate.name}` : "Form Completion";
+        pageSubtitle = "Complete commissioning boxes and export branded PDF.";
         content = (
-          <div className="opsFormFillLayout">
-            <aside className="opsPanel">
-              <h3>Sections</h3>
-              <div className="opsList">
-                {["General", "Safety", "Materials", "Photos", "Signatures"].map((section, idx) => (
-                  <button
-                    key={section}
-                    type="button"
-                    className={activeFormStep === idx + 1 ? "active" : ""}
-                    onClick={() => setActiveFormStep(idx + 1)}
-                  >
-                    {idx + 1}. {section}
+          <section className="opsPanel opsCommissioningEditor">
+            {editingTemplate && activeCommissioningSubmission ? (
+              <>
+                <div className="opsInline">
+                  <button type="button" onClick={() => logoUploadInputRef.current?.click()}>
+                    {companyLogoDataUrl ? "Replace Company Logo" : "Upload Company Logo"}
                   </button>
-                ))}
-              </div>
-            </aside>
-            <section className="opsPanel">
-              <div className="opsProgressBlock">
-                <small>Form progress</small>
-                <div className="opsProgressBar">
-                  <span style={{ width: `${(activeFormStep / 5) * 100}%` }} />
+                  {companyLogoDataUrl ? (
+                    <button type="button" onClick={() => setCompanyLogoDataUrl("")}>
+                      Remove Logo
+                    </button>
+                  ) : null}
+                  <input
+                    ref={logoUploadInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hiddenInput"
+                    onChange={(event) => {
+                      void handleCompanyLogoUpload(event.target.files?.[0] ?? null);
+                      event.currentTarget.value = "";
+                    }}
+                  />
                 </div>
-              </div>
-              <div className="opsFields">
-                <label>
-                  Text field
-                  <input type="text" placeholder="Enter notes" />
-                </label>
-                <label>
-                  Date
-                  <input type="date" />
-                </label>
-                <label>
-                  Dropdown
-                  <select>
-                    <option>Good</option>
-                    <option>Needs action</option>
-                  </select>
-                </label>
-                <label>
-                  <input type="checkbox" /> Include photographic evidence
-                </label>
-                <label>
-                  Signature
-                  <input type="text" placeholder="Signed by" />
-                </label>
-              </div>
-              <div className="opsInline">
-                <button type="button" onClick={() => setActiveFormStep((prev) => Math.max(1, prev - 1))}>
-                  Previous
-                </button>
-                <button type="button" onClick={() => setActiveFormStep((prev) => Math.min(5, prev + 1))}>
-                  Next
-                </button>
-                <button type="button" onClick={() => notify("Draft saved locally.")}>
-                  Save Draft
-                </button>
-                <button
-                  type="button"
-                  className="btnSuccess"
-                  onClick={() => {
-                    if (!route.formId) return;
-                    setCompletedFormIds((prev) => (prev.includes(route.formId!) ? prev : [...prev, route.formId!]));
-                    navigateOps(`/forms/submissions/${route.formId}`);
-                  }}
-                >
-                  Submit
-                </button>
-              </div>
-            </section>
-          </div>
+                {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="opsFormLogoPreview" /> : null}
+                {editingSections.map((section) => (
+                  <div key={section.id} className="opsCommissioningSection">
+                    <h4>{section.title}</h4>
+                    <div className="opsFields">
+                      {section.fields.map((field) => (
+                        <label key={field.id}>
+                          {field.label}
+                          {field.type === "textarea" ? (
+                            <textarea
+                              value={activeCommissioningValues[field.id] ?? ""}
+                              placeholder={field.placeholder}
+                              onChange={(event) =>
+                                setActiveCommissioningValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                            />
+                          ) : field.type === "checkbox" ? (
+                            <input
+                              type="checkbox"
+                              checked={activeCommissioningValues[field.id] === "true"}
+                              onChange={(event) =>
+                                setActiveCommissioningValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: String(event.target.checked),
+                                }))
+                              }
+                            />
+                          ) : (
+                            <input
+                              type={field.type}
+                              value={activeCommissioningValues[field.id] ?? ""}
+                              placeholder={field.placeholder}
+                              onChange={(event) =>
+                                setActiveCommissioningValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="opsInline">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const saved = saveCommissioningSubmission("draft");
+                      if (saved) notify("Form draft saved.");
+                    }}
+                  >
+                    Save Draft
+                  </button>
+                  <button
+                    type="button"
+                    className="btnSuccess"
+                    onClick={() => {
+                      const saved = saveCommissioningSubmission("completed");
+                      if (saved) void exportCommissioningSubmission(saved);
+                    }}
+                  >
+                    Export Final PDF
+                  </button>
+                  <button type="button" onClick={() => navigateOps("/forms")}>
+                    Back to Forms
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p>Select a commissioning template to start.</p>
+            )}
+          </section>
         );
       } else if (route.mode === "view") {
         pageTitle = "Form Submission";
@@ -5385,7 +5454,6 @@ function App() {
                     type="button"
                     onClick={() => {
                       setActiveFormId(form.id);
-                      setActiveFormStep(1);
                       navigateOps(`/forms/${form.id}/fill`);
                     }}
                   >
