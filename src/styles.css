@@ -1785,3 +1785,85 @@ label {
     min-height: auto;
   }
 }
+
+/* Final readability overrides for light theme */
+body {
+  background: #eef3f8 !important;
+  color: #1b2736 !important;
+}
+
+.appShellHeader,
+.toolbar,
+.panel,
+.opsPanel,
+.opsSummaryCard,
+.opsListRow,
+.opsProjectTableRow,
+.opsProjectCell,
+.opsFolderTreeRow,
+.authCard,
+.thumbRail,
+.thumbButton,
+.empty {
+  background: #ffffff !important;
+  border-color: #d2deec !important;
+}
+
+.opsAppRoot {
+  background: #eef4fb !important;
+  color: #1f3145 !important;
+}
+
+.opsAppRoot h1,
+.opsAppRoot h2,
+.opsAppRoot h3,
+.opsAppRoot h4,
+.opsAppRoot strong,
+.opsAppRoot th,
+.opsAppRoot td,
+.opsAppRoot p,
+.opsAppRoot span,
+.opsAppRoot label,
+.opsAppRoot small,
+.appShellHeader h1,
+.appShellHeader p,
+.pageHeader,
+.pageHeader h3 {
+  color: #1f3145 !important;
+}
+
+.opsSubtle,
+.opsHeaderMeta,
+.opsProjectMeta p,
+.opsProjectCell::before,
+.opsListRow small,
+.selectedMeta {
+  color: #526a83 !important;
+}
+
+button,
+input[type="text"],
+select,
+textarea {
+  color: #1f3145 !important;
+  background: #ffffff !important;
+  border-color: #c7d8ea !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #738ba4 !important;
+}
+
+button.active,
+.opsMobileBottomNav button.active,
+.opsDesktopSidebar button.active {
+  color: #ffffff !important;
+  background: #1980ff !important;
+  border-color: #1980ff !important;
+}
+
+.btnSuccess,
+.btnWarning {
+  color: #ffffff !important;
+}
