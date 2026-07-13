@@ -2667,31 +2667,103 @@ function App() {
     }
 
     const pdf = await PDFDocument.create();
-    let page = pdf.addPage([842, 595]);
-    let y = 560;
-    const marginX = 34;
+    const pageWidth = 595;
+    const pageHeight = 842;
+    const margin = 28;
+    const contentWidth = pageWidth - margin * 2;
+    const labelWidth = 190;
+    const valueWidth = contentWidth - labelWidth - 14;
+    const headerHeight = 72;
 
-    page.drawRectangle({ x: marginX - 8, y: 518, width: 782, height: 52, color: rgb(0.06, 0.16, 0.31) });
-    page.drawText("London AC Ltd - Commissioning Form", { x: marginX + 8, y: 548, size: 13, color: rgb(1, 1, 1) });
-    page.drawText(template.name, { x: marginX + 8, y: 531, size: 11, color: rgb(0.85, 0.91, 1) });
-    page.drawText(`Project: ${selectedProject?.name ?? submission.values.project ?? "-"}`, {
-      x: 520,
-      y: 548,
-      size: 9,
-      color: rgb(0.95, 0.97, 1),
-    });
-    page.drawText(`Date: ${new Date(submission.updatedAt).toLocaleDateString()}`, { x: 520, y: 534, size: 9, color: rgb(0.95, 0.97, 1) });
+    function wrapText(input: string, maxChars = 62): string[] {
+      const source = input.trim();
+      if (!source) return ["-"];
+      const words = source.split(/\s+/);
+      const lines: string[] = [];
+      let line = "";
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (next.length <= maxChars) {
+          line = next;
+          continue;
+        }
+        if (line) lines.push(line);
+        line = word;
+      }
+      if (line) lines.push(line);
+      return lines.length > 0 ? lines : ["-"];
+    }
+
+    let pageNumber = 1;
+    let page = pdf.addPage([pageWidth, pageHeight]);
+
+    const drawHeader = (targetPage: typeof page): number => {
+      const topY = pageHeight - margin;
+      const headerBottom = topY - headerHeight;
+      targetPage.drawRectangle({
+        x: margin,
+        y: headerBottom,
+        width: contentWidth,
+        height: headerHeight,
+        color: rgb(0.08, 0.18, 0.33),
+      });
+      targetPage.drawText("London AC Ltd - Commissioning Form", {
+        x: margin + 12,
+        y: headerBottom + 46,
+        size: 13,
+        color: rgb(1, 1, 1),
+      });
+      targetPage.drawText(template.name, {
+        x: margin + 12,
+        y: headerBottom + 29,
+        size: 11,
+        color: rgb(0.85, 0.91, 1),
+      });
+      targetPage.drawText(`Project: ${selectedProject?.name ?? submission.values.project ?? "-"}`, {
+        x: margin + 12,
+        y: headerBottom + 14,
+        size: 9,
+        color: rgb(0.95, 0.97, 1),
+      });
+      targetPage.drawText(`Updated: ${new Date(submission.updatedAt).toLocaleString()}`, {
+        x: margin + 290,
+        y: headerBottom + 14,
+        size: 9,
+        color: rgb(0.95, 0.97, 1),
+      });
+      targetPage.drawText(`Page ${pageNumber}`, {
+        x: pageWidth - margin - 52,
+        y: headerBottom + 14,
+        size: 9,
+        color: rgb(0.95, 0.97, 1),
+      });
+      return headerBottom - 16;
+    };
+
+    const addNewPage = (): number => {
+      page = pdf.addPage([pageWidth, pageHeight]);
+      pageNumber += 1;
+      return drawHeader(page);
+    };
+
+    let y = drawHeader(page);
 
     if (companyLogoDataUrl.startsWith("data:image/")) {
       try {
         const logoBytes = dataUrlToBytes(companyLogoDataUrl);
-        const logoImage = companyLogoDataUrl.includes("image/png") ? await pdf.embedPng(logoBytes) : await pdf.embedJpg(logoBytes);
-        const scaled = logoImage.scale(0.22);
+        const logoImage = companyLogoDataUrl.includes("image/png")
+          ? await pdf.embedPng(logoBytes)
+          : await pdf.embedJpg(logoBytes);
+        const maxLogoWidth = 116;
+        const maxLogoHeight = 38;
+        const logoScale = Math.min(maxLogoWidth / logoImage.width, maxLogoHeight / logoImage.height);
+        const width = logoImage.width * logoScale;
+        const height = logoImage.height * logoScale;
         page.drawImage(logoImage, {
-          x: 728 - scaled.width,
-          y: 526,
-          width: scaled.width,
-          height: scaled.height,
+          x: pageWidth - margin - width - 10,
+          y: pageHeight - margin - headerHeight + 18,
+          width,
+          height,
         });
       } catch {
         // Ignore logo parsing errors and continue export.
@@ -2699,25 +2771,68 @@ function App() {
     }
 
     for (const section of getTemplateSections(submission.templateId)) {
-      if (y < 70) {
-        page = pdf.addPage([842, 595]);
-        y = 560;
+      const estimatedSectionHeight = 28 + section.fields.length * 30;
+      if (y - estimatedSectionHeight < margin + 26) {
+        y = addNewPage();
       }
-      page.drawRectangle({ x: marginX - 4, y: y - 8, width: 782, height: 22, color: rgb(0.9, 0.94, 1) });
-      page.drawText(section.title, { x: marginX + 2, y, size: 10, color: rgb(0.06, 0.16, 0.31) });
-      y -= 24;
+
+      page.drawRectangle({
+        x: margin,
+        y: y - 20,
+        width: contentWidth,
+        height: 22,
+        color: rgb(0.86, 0.91, 0.98),
+      });
+      page.drawText(section.title, {
+        x: margin + 8,
+        y: y - 13,
+        size: 11,
+        color: rgb(0.08, 0.16, 0.29),
+      });
+      y -= 28;
+
       for (const field of section.fields) {
-        if (y < 34) {
-          page = pdf.addPage([842, 595]);
-          y = 560;
-        }
         const rawValue = submission.values[field.id] ?? "";
-        const value = field.type === "checkbox" ? (rawValue === "true" ? "Yes" : "No") : rawValue || "-";
-        page.drawText(`${field.label}:`, { x: marginX, y, size: 9, color: rgb(0.78, 0.84, 0.93) });
-        page.drawText(String(value).slice(0, 110), { x: marginX + 250, y, size: 9, color: rgb(0.97, 0.99, 1) });
-        y -= 14;
+        const fieldValue =
+          field.type === "checkbox" ? (rawValue === "true" ? "Yes" : "No") : rawValue || "-";
+        const valueLines = wrapText(String(fieldValue), field.type === "textarea" ? 60 : 68);
+        const rowHeight = Math.max(24, valueLines.length * 12 + 10);
+
+        if (y - rowHeight < margin + 20) {
+          y = addNewPage();
+        }
+
+        page.drawRectangle({
+          x: margin,
+          y: y - rowHeight,
+          width: contentWidth,
+          height: rowHeight,
+          borderColor: rgb(0.84, 0.88, 0.95),
+          borderWidth: 1,
+          color: rgb(0.98, 0.99, 1),
+        });
+        page.drawText(field.label, {
+          x: margin + 8,
+          y: y - 15,
+          size: 9,
+          color: rgb(0.2, 0.28, 0.39),
+        });
+
+        let lineY = y - 15;
+        for (const line of valueLines) {
+          page.drawText(line, {
+            x: margin + labelWidth,
+            y: lineY,
+            size: 9,
+            color: rgb(0.05, 0.11, 0.2),
+            maxWidth: valueWidth,
+          });
+          lineY -= 11;
+        }
+
+        y -= rowHeight + 6;
       }
-      y -= 8;
+      y -= 4;
     }
 
     const bytes = await pdf.save();
