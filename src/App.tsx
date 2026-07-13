@@ -373,8 +373,6 @@ function App() {
   const [newFileName, setNewFileName] = useState<string>("");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [opsLoading, setOpsLoading] = useState<boolean>(false);
-  const [opsProjectName, setOpsProjectName] = useState<string>("New Street Square");
-  const [opsLocationName, setOpsLocationName] = useState<string>("London EC4A 3BZ");
   const [fileSearch, setFileSearch] = useState<string>("");
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
@@ -622,12 +620,6 @@ function App() {
       setSelectedProjectId(projects[0].id);
     }
   }, [projects, selectedProjectId]);
-
-  useEffect(() => {
-    if (!selectedProject) return;
-    setOpsProjectName(selectedProject.name);
-    setOpsLocationName(selectedProject.address);
-  }, [selectedProject]);
 
   useEffect(() => {
     if (opsRoute.name !== "projects" || !opsRoute.projectId) return;
@@ -2059,7 +2051,7 @@ function App() {
       client: newProjectClient.trim() || "Client",
       manager: newProjectManager.trim() || currentUser.name,
       status: newProjectStatus,
-      address: newProjectAddress.trim() || opsLocationName,
+      address: newProjectAddress.trim() || selectedProject?.address || "",
       startDate: newProjectStart || new Date().toISOString().slice(0, 10),
       targetDate: newProjectTarget || "",
       description: newProjectDescription.trim(),
@@ -3846,11 +3838,17 @@ function App() {
             <div className="opsFields">
               <label>
                 Project selector
-                <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+                <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name} ({project.code})
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Site address
-                <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+                <input type="text" value={selectedProject?.address ?? "No site address set for this project"} readOnly />
               </label>
               <label>
                 GPS status
@@ -3971,7 +3969,7 @@ function App() {
                   <tr key={row.workerId}>
                     <td>{row.workerName}</td>
                     <td>{formatMinutes(row.minutes)}</td>
-                    <td>{opsProjectName}</td>
+                    <td>{selectedProject?.name ?? "-"}</td>
                     <td>
                       <button type="button" onClick={() => notify(`Manual adjustment queued for ${row.workerName}.`)}>
                         Adjust
@@ -4731,11 +4729,17 @@ function App() {
           <section className="opsPanel opsFields">
             <label>
               Project selector
-              <input type="text" value={opsProjectName} onChange={(event) => setOpsProjectName(event.target.value)} />
+              <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name} ({project.code})
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Site address
-              <input type="text" value={opsLocationName} onChange={(event) => setOpsLocationName(event.target.value)} />
+              <input type="text" value={selectedProject?.address ?? "No site address set for this project"} readOnly />
             </label>
             <label>
               Logged in user
