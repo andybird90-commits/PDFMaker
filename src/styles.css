@@ -681,11 +681,23 @@ label {
 
 .opsFields label {
   width: 100%;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.28rem 0.42rem;
 }
 
 .opsFields input,
 .opsFields select {
   width: 100%;
+}
+
+@media (max-width: 640px) {
+  .opsFields label {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
 }
 
 .opsSignOutGrid,
