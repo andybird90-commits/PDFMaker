@@ -1127,7 +1127,7 @@ label {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 639px) {
   .opsProjectTableRow {
     grid-template-columns: 1fr;
   }
