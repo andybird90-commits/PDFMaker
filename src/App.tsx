@@ -458,6 +458,7 @@ const CURRENT_USER = {
   email: "andy.bird@rdmande.uk",
 };
 const OWNER_EMAIL = "andy.bird@rdmande.uk";
+const COMPANY_NAME = "LONDON AC LTD";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -605,7 +606,6 @@ function App() {
   const [commissioningSubmissions, setCommissioningSubmissions] = useState<CommissioningSubmission[]>([]);
   const [activeCommissioningSubmissionId, setActiveCommissioningSubmissionId] = useState<string | null>(null);
   const [activeCommissioningValues, setActiveCommissioningValues] = useState<Record<string, string>>({});
-  const [companyLogoDataUrl, setCompanyLogoDataUrl] = useState<string>("");
   const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/home");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
@@ -628,7 +628,6 @@ function App() {
   const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
   const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
   const opsStorageWarnedRef = useRef<boolean>(false);
-  const logoUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const svgRefs = useRef<Record<number, SVGSVGElement | null>>({});
@@ -1091,7 +1090,6 @@ function App() {
           folders?: FolderNode[];
           projectFiles?: ProjectFile[];
           commissioningSubmissions?: CommissioningSubmission[];
-          companyLogoDataUrl?: string;
         };
         setWorkers(Array.isArray(parsed.workers) ? parsed.workers : []);
         setTimeEntries(Array.isArray(parsed.timeEntries) ? parsed.timeEntries : []);
@@ -1117,7 +1115,6 @@ function App() {
             : [],
         );
         setCommissioningSubmissions(Array.isArray(parsed.commissioningSubmissions) ? parsed.commissioningSubmissions : []);
-        setCompanyLogoDataUrl(typeof parsed.companyLogoDataUrl === "string" ? parsed.companyLogoDataUrl : "");
         if (loadedFolders.length > 0) {
           setSelectedFolderId(loadedFolders[0].id);
         }
@@ -1145,7 +1142,6 @@ function App() {
           folders,
           projectFiles,
           commissioningSubmissions,
-          companyLogoDataUrl,
         }),
       );
     } catch (error) {
@@ -1165,7 +1161,6 @@ function App() {
     folders,
     projectFiles,
     commissioningSubmissions,
-    companyLogoDataUrl,
   ]);
 
   useEffect(() => {
@@ -2697,6 +2692,12 @@ function App() {
     let pageNumber = 1;
     let page = pdf.addPage([pageWidth, pageHeight]);
 
+    const drawLondonAcLogo = (targetPage: typeof page, x: number, y: number): void => {
+      targetPage.drawText("LONDON", { x, y, size: 18, color: rgb(0.97, 0.99, 1) });
+      targetPage.drawRectangle({ x, y: y - 3, width: 98, height: 2, color: rgb(0.97, 0.99, 1) });
+      targetPage.drawText("AC LTD", { x: x + 58, y: y - 16, size: 8, color: rgb(0.9, 0.95, 1) });
+    };
+
     const drawHeader = (targetPage: typeof page): number => {
       const topY = pageHeight - margin;
       const headerBottom = topY - headerHeight;
@@ -2737,6 +2738,7 @@ function App() {
         size: 9,
         color: rgb(0.95, 0.97, 1),
       });
+      drawLondonAcLogo(targetPage, pageWidth - margin - 106, headerBottom + 42);
       return headerBottom - 16;
     };
 
@@ -2747,28 +2749,6 @@ function App() {
     };
 
     let y = drawHeader(page);
-
-    if (companyLogoDataUrl.startsWith("data:image/")) {
-      try {
-        const logoBytes = dataUrlToBytes(companyLogoDataUrl);
-        const logoImage = companyLogoDataUrl.includes("image/png")
-          ? await pdf.embedPng(logoBytes)
-          : await pdf.embedJpg(logoBytes);
-        const maxLogoWidth = 170;
-        const maxLogoHeight = 58;
-        const logoScale = Math.min(maxLogoWidth / logoImage.width, maxLogoHeight / logoImage.height);
-        const width = logoImage.width * logoScale;
-        const height = logoImage.height * logoScale;
-        page.drawImage(logoImage, {
-          x: pageWidth - margin - width + 2,
-          y: pageHeight - margin - height + 2,
-          width,
-          height,
-        });
-      } catch {
-        // Ignore logo parsing errors and continue export.
-      }
-    }
 
     for (const section of getTemplateSections(submission.templateId)) {
       const estimatedSectionHeight = 28 + section.fields.length * 30;
@@ -2849,21 +2829,6 @@ function App() {
     });
     downloadBlob(new Blob([toArrayBuffer(safeBytes)], { type: "application/pdf" }), exportName);
     notify(`Exported ${template.name}.`);
-  }
-
-  async function handleCompanyLogoUpload(file: File | null): Promise<void> {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      notify("Please choose an image file for the company logo.");
-      return;
-    }
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      setCompanyLogoDataUrl(dataUrl);
-      notify("Company logo updated.");
-    } catch (error) {
-      notify(`Logo upload failed: ${getErrorMessage(error)}`);
-    }
   }
 
   async function handleProjectFileUpload(files: FileList | File[] | null, targetFileId?: string): Promise<void> {
@@ -5173,27 +5138,7 @@ function App() {
               <section className="opsPanel">
                 <h3>Commissioning Templates</h3>
                 <p className="opsSubtle">Start a new project form from your common commissioning templates.</p>
-                <div className="opsInline">
-                  <button type="button" onClick={() => logoUploadInputRef.current?.click()}>
-                    {companyLogoDataUrl ? "Replace Company Logo" : "Upload Company Logo"}
-                  </button>
-                  {companyLogoDataUrl ? (
-                    <button type="button" onClick={() => setCompanyLogoDataUrl("")}>
-                      Remove Logo
-                    </button>
-                  ) : null}
-                  <input
-                    ref={logoUploadInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hiddenInput"
-                    onChange={(event) => {
-                      void handleCompanyLogoUpload(event.target.files?.[0] ?? null);
-                      event.currentTarget.value = "";
-                    }}
-                  />
-                </div>
-                {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="opsFormLogoPreview" /> : null}
+                <div className="opsPermanentLogoNote">Permanent branding: {COMPANY_NAME}</div>
                 <div className="opsList">
                   {FORM_TEMPLATES.map((form) => (
                     <div key={form.id} className="opsListRow">
@@ -5402,27 +5347,7 @@ function App() {
           <section className="opsPanel opsCommissioningEditor">
             {editingTemplate && activeCommissioningSubmission ? (
               <>
-                <div className="opsInline">
-                  <button type="button" onClick={() => logoUploadInputRef.current?.click()}>
-                    {companyLogoDataUrl ? "Replace Company Logo" : "Upload Company Logo"}
-                  </button>
-                  {companyLogoDataUrl ? (
-                    <button type="button" onClick={() => setCompanyLogoDataUrl("")}>
-                      Remove Logo
-                    </button>
-                  ) : null}
-                  <input
-                    ref={logoUploadInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hiddenInput"
-                    onChange={(event) => {
-                      void handleCompanyLogoUpload(event.target.files?.[0] ?? null);
-                      event.currentTarget.value = "";
-                    }}
-                  />
-                </div>
-                {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="opsFormLogoPreview" /> : null}
+                <div className="opsPermanentLogoNote">Permanent branding: {COMPANY_NAME}</div>
                 {editingSections.map((section) => (
                   <div key={section.id} className="opsCommissioningSection">
                     <h4>{section.title}</h4>
@@ -5857,7 +5782,10 @@ function App() {
     <div className="app">
       <header className="appShellHeader">
         <div className="appBrand">
-          {companyLogoDataUrl ? <img src={companyLogoDataUrl} alt="Company logo" className="appBrandLogo" /> : null}
+          <div className="appBrandLogoMark" aria-label="London AC Ltd logo">
+            <strong>LONDON</strong>
+            <span>AC LTD</span>
+          </div>
           <h1>MEP OPS Platform</h1>
           <p>Operational workspace with markup studio</p>
         </div>

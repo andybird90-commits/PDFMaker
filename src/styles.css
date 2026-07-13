@@ -42,12 +42,37 @@ body {
   gap: 0.15rem;
 }
 
-.appBrandLogo {
-  width: 210px;
-  max-height: 62px;
-  object-fit: contain;
-  object-position: left;
-  margin-top: -2px;
+.appBrandLogoMark {
+  position: relative;
+  width: 206px;
+  color: #f8fafc;
+  line-height: 1;
+}
+
+.appBrandLogoMark strong {
+  display: block;
+  font-size: 2rem;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+}
+
+.appBrandLogoMark::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 1.95rem;
+  height: 2px;
+  background: rgba(226, 237, 255, 0.95);
+}
+
+.appBrandLogoMark span {
+  display: block;
+  text-align: right;
+  margin-top: 0.2rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  color: #dbe8ff;
 }
 
 .appShellHeader h1 {
@@ -850,6 +875,18 @@ label {
   border-radius: 8px;
   background: rgba(10, 20, 35, 0.7);
   padding: 0.35rem;
+}
+
+.opsPermanentLogoNote {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(80, 116, 156, 0.6);
+  background: rgba(15, 28, 47, 0.65);
+  color: #cfe0ff;
+  font-size: 0.72rem;
+  margin-bottom: 0.45rem;
 }
 
 .opsCommissioningEditor {
