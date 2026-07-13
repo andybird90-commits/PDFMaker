@@ -134,6 +134,7 @@ type GpsSnapshot = {
   source: "device" | "entry";
 };
 type OpsRoute =
+  | { name: "home" }
   | { name: "sign-in" }
   | { name: "sign-out" }
   | { name: "timesheets"; date?: string }
@@ -264,6 +265,8 @@ function parseGpsNote(note?: string): { lat: number; lng: number; accuracyM: num
 
 function isOpsPath(pathname: string): boolean {
   return (
+    pathname === "/" ||
+    pathname === "/home" ||
     pathname === "/sign-in" ||
     pathname === "/sign-out" ||
     pathname === "/timesheets" ||
@@ -280,6 +283,7 @@ function isOpsPath(pathname: string): boolean {
 }
 
 function parseOpsRoute(pathname: string): OpsRoute {
+  if (pathname === "/" || pathname === "/home") return { name: "home" };
   if (pathname === "/sign-out") return { name: "sign-out" };
   if (pathname === "/timesheets") return { name: "timesheets" };
   if (pathname.startsWith("/timesheets/")) return { name: "timesheets", date: pathname.split("/")[2] };
@@ -301,7 +305,7 @@ function parseOpsRoute(pathname: string): OpsRoute {
   if (/^\/forms\/submissions\/[^/]+$/.test(pathname)) {
     return { name: "forms", submissionId: pathname.split("/")[3], mode: "view" };
   }
-  return { name: "sign-in" };
+  return { name: "home" };
 }
 
 function toMapEmbedUrl(gps: GpsSnapshot | null): string {
@@ -376,7 +380,7 @@ function App() {
   const [fileSearch, setFileSearch] = useState<string>("");
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [completedFormIds, setCompletedFormIds] = useState<string[]>([]);
-  const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/sign-in");
+  const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/home");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [activeFormStep, setActiveFormStep] = useState<number>(1);
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
@@ -3812,7 +3816,7 @@ function App() {
     const activeNav = route.name === "projects" ? "projects" : route.name === "timesheets" ? "timesheets" : route.name === "forms" ? "forms" : "home";
 
     const navItems = [
-      { key: "home", label: "Home", path: "/sign-in" },
+      { key: "home", label: "Home", path: "/home" },
       { key: "projects", label: "Projects", path: "/projects" },
       { key: "timesheets", label: "Timesheets", path: "/timesheets" },
       { key: "forms", label: "Forms", path: "/forms" },
@@ -3824,11 +3828,39 @@ function App() {
       ? `https://www.openstreetmap.org/?mlat=${liveGps.lat}&mlon=${liveGps.lng}#map=18/${liveGps.lat}/${liveGps.lng}`
       : "https://www.openstreetmap.org";
 
-    let pageTitle = "Sign In";
-    let pageSubtitle = "Securely sign yourself into the selected project";
+    let pageTitle = "Operations Home";
+    let pageSubtitle = "Choose where you want to go";
     let content: ReactElement = <div />;
 
-    if (route.name === "sign-out") {
+    if (route.name === "home") {
+      pageTitle = "Operations Home";
+      pageSubtitle = "Choose clock in/out or open your project workspace";
+      content = (
+        <div className="opsSummaryGrid">
+          <section className="opsSummaryCard">
+            <h4>Clock In / Out</h4>
+            <p className="opsSubtle">Go to GPS attendance to sign in or sign out your authenticated account.</p>
+            <div className="opsInline">
+              <button type="button" className="btnSuccess" onClick={() => navigateOps("/sign-in")}>
+                Open Clock In
+              </button>
+              <button type="button" className="btnWarning" onClick={() => navigateOps("/sign-out")}>
+                Open Clock Out
+              </button>
+            </div>
+          </section>
+          <section className="opsSummaryCard">
+            <h4>Projects</h4>
+            <p className="opsSubtle">Open your project overview, documents and full markup editor workflows.</p>
+            <div className="opsInline">
+              <button type="button" onClick={() => navigateOps("/projects")}>
+                Open Projects
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    } else if (route.name === "sign-out") {
       pageTitle = "GPS Sign Out";
       pageSubtitle = "Securely sign yourself out from the selected project";
       content = (
@@ -4718,7 +4750,7 @@ function App() {
           </section>
         );
       }
-    } else {
+    } else if (route.name === "sign-in") {
       pageTitle = "GPS Sign In";
       pageSubtitle = "Capture project and your attendance with geofence checks";
       const selectedWorkerLastAction = selectedWorker ? latestEntryByWorker[selectedWorker.id] : undefined;
@@ -4780,6 +4812,16 @@ function App() {
             </p>
           </section>
         </div>
+      );
+    } else {
+      pageTitle = "Operations Home";
+      pageSubtitle = "Choose where you want to go";
+      content = (
+        <section className="opsPanel">
+          <button type="button" onClick={() => navigateOps("/home")}>
+            Open Home
+          </button>
+        </section>
       );
     }
 
@@ -4988,7 +5030,7 @@ function App() {
           <button
             type="button"
             className={activeModule === "operations" ? "active" : ""}
-            onClick={() => navigateOps("/sign-in")}
+            onClick={() => navigateOps("/home")}
           >
             Operations
           </button>
