@@ -4632,28 +4632,35 @@ function App() {
       content = (
         <div className="opsHomeStack">
           <section className="opsWeatherWidget">
-            <div className="opsWeatherPrimary">
-              <p>
-                {greeting}, {currentUser.name}
-              </p>
-              <strong>{formatTimeUk(now)}</strong>
-              <span>{formatLongDateUk(now)}</span>
+            <div className="opsWeatherLeft">
+              <div className="opsWeatherPrimary">
+                <p>
+                  {greeting}, {currentUser.name}
+                </p>
+                <strong>{formatTimeUk(now)}</strong>
+                <span>{formatLongDateUk(now)}</span>
+              </div>
+              <div className="opsWeatherStats">
+                <div className="opsWeatherMetric">
+                  <strong>{weather ? `${weather.temperatureC}°C` : "—"}</strong>
+                  <span>Temperature</span>
+                </div>
+                <div className="opsWeatherMetric">
+                  <strong>{weather?.rainChancePct != null ? `${weather.rainChancePct}%` : "—"}</strong>
+                  <span>Chance of rain</span>
+                </div>
+                <div className="opsWeatherMetric">
+                  <strong>{weather?.windMph != null ? `${weather.windMph} mph` : "—"}</strong>
+                  <span>Wind</span>
+                </div>
+              </div>
             </div>
-            <div className="opsWeatherMetric">
+            <div className="opsWeatherRight">
               <div className="opsWeatherVisual" aria-hidden="true">
                 {weatherIcon}
               </div>
-              <strong>{weather ? `${weather.temperatureC}°C` : "—"}</strong>
-              <span>{weatherLoading ? "Loading weather…" : weather?.condition ?? "Weather unavailable"}</span>
-              <small>{weather && weather.highC != null && weather.lowC != null ? `↑ ${weather.highC}°  ↓ ${weather.lowC}°` : " "}</small>
-            </div>
-            <div className="opsWeatherMetric">
-              <strong>{weather?.rainChancePct != null ? `${weather.rainChancePct}%` : "—"}</strong>
-              <span>Chance of rain</span>
-            </div>
-            <div className="opsWeatherMetric">
-              <strong>{weather?.windMph != null ? `${weather.windMph} mph` : "—"}</strong>
-              <span>Wind</span>
+              <strong>{weatherLoading ? "Loading weather…" : weather?.condition ?? "Weather unavailable"}</strong>
+              <span>{weather && weather.highC != null && weather.lowC != null ? `High ${weather.highC}° • Low ${weather.lowC}°` : " "}</span>
             </div>
             <small className="opsSubtle">
               {weatherError || (weather?.updatedAt ? `Updated ${formatTimeUk(weather.updatedAt)}` : "Weather refreshes automatically on this page.")}
