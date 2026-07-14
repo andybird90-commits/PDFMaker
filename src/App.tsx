@@ -5324,7 +5324,7 @@ function App() {
           );
         } else if (workspaceSection === "hub") {
           workspaceContent = (
-            <div className="opsLandingTiles">
+            <div className="opsLandingTiles opsProjectHubTiles">
               <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
                 <strong>Files</strong>
                 <span>Open full filing structure</span>
