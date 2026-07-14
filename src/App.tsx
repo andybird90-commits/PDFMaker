@@ -199,6 +199,10 @@ type ProjectEditorContext = {
   fileId: string;
   fileName: string;
 };
+type FileMoveDialogState = {
+  fileId: string;
+  destinationFolderId: string;
+};
 
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_HIGHLIGHTER_WIDTH = 14;
@@ -772,6 +776,7 @@ function App() {
   const [expandedFolderIds, setExpandedFolderIds] = useState<Record<string, boolean>>({});
   const [versionHistoryFileId, setVersionHistoryFileId] = useState<string | null>(null);
   const [versionUploadTargetId, setVersionUploadTargetId] = useState<string | null>(null);
+  const [fileMoveDialog, setFileMoveDialog] = useState<FileMoveDialogState | null>(null);
   const [projectEditorContext, setProjectEditorContext] = useState<ProjectEditorContext | null>(null);
   const [openFileNeedsSaveWarning, setOpenFileNeedsSaveWarning] = useState<boolean>(false);
   const [isCompactToolbar, setIsCompactToolbar] = useState<boolean>(() => window.innerWidth <= 1280);
@@ -3164,23 +3169,29 @@ function App() {
     }
     const file = projectFiles.find((item) => item.id === fileId);
     if (!file) return;
-    const destinationName = window.prompt("Move to folder name", "");
-    if (destinationName === null) return;
-    const destination = folders.find(
-      (folder) => folder.projectId === selectedProjectId && folder.name.toLowerCase() === destinationName.trim().toLowerCase(),
-    );
-    if (!destination && destinationName.trim()) {
-      notify("Destination folder not found.");
+    setFileMoveDialog({
+      fileId,
+      destinationFolderId: file.folderId ?? "__root__",
+    });
+  }
+
+  function confirmMoveProjectFile(): void {
+    if (!fileMoveDialog) return;
+    const file = projectFiles.find((item) => item.id === fileMoveDialog.fileId);
+    if (!file) {
+      setFileMoveDialog(null);
       return;
     }
+    const destination = fileMoveDialog.destinationFolderId === "__root__" ? null : folders.find((folder) => folder.id === fileMoveDialog.destinationFolderId);
     setProjectFiles((prev) =>
       prev.map((item) =>
-        item.id === fileId
+        item.id === fileMoveDialog.fileId
           ? { ...item, folderId: destination?.id ?? null, updatedAt: new Date().toISOString() }
           : item,
       ),
     );
     logProjectActivity("file moved", `${file.name} -> ${destination?.name ?? "Root"}`, selectedProjectId);
+    setFileMoveDialog(null);
   }
 
   function copyProjectFile(fileId: string): void {
@@ -5004,6 +5015,7 @@ function App() {
         const workspaceProject = projects.find((project) => project.slug === route.projectId) ?? selectedProject;
         const workspaceProjectId = workspaceProject?.id ?? selectedProjectId;
         const workspaceFolders = folders.filter((folder) => folder.projectId === workspaceProjectId);
+        const fileMoveTarget = fileMoveDialog ? projectFiles.find((file) => file.id === fileMoveDialog.fileId) ?? null : null;
         const projectCommissioningSubmissions = commissioningSubmissions
           .filter((item) => item.projectId === workspaceProjectId)
           .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -5536,6 +5548,46 @@ function App() {
               </section>
             ) : null}
             {workspaceContent}
+            {fileMoveDialog ? (
+              <section className="opsModalBackdrop" onClick={() => setFileMoveDialog(null)}>
+                <div className="opsModalCard" onClick={(event) => event.stopPropagation()}>
+                  <h3>Move file</h3>
+                  <div className="opsFields">
+                    <label>
+                      File
+                      <input type="text" value={fileMoveTarget?.name ?? "File"} readOnly />
+                    </label>
+                    <label>
+                      Destination folder
+                      <select
+                        value={fileMoveDialog.destinationFolderId}
+                        onChange={(event) =>
+                          setFileMoveDialog((prev) => (prev ? { ...prev, destinationFolderId: event.target.value } : prev))
+                        }
+                      >
+                        <option value="__root__">Root (All files)</option>
+                        {workspaceFolders
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((folder) => (
+                            <option key={folder.id} value={folder.id}>
+                              {folder.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="opsInline">
+                    <button type="button" onClick={confirmMoveProjectFile}>
+                      Move file
+                    </button>
+                    <button type="button" onClick={() => setFileMoveDialog(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
           </div>
         );
       }
