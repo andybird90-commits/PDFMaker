@@ -928,7 +928,6 @@ label {
 }
 
 .opsWeatherRight {
-  border-left: 1px solid rgba(109, 137, 172, 0.38);
   padding-left: 0.9rem;
   display: grid;
   align-content: center;
