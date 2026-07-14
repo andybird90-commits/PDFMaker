@@ -1059,7 +1059,7 @@ label {
   right: 0;
   z-index: 4;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.2rem;
   padding: 0.35rem;
   background: #091426;
