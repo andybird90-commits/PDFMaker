@@ -4671,6 +4671,10 @@ function App() {
               <strong>Clock In / Out</strong>
               <span>Open GPS attendance</span>
             </button>
+            <button type="button" className="opsLandingTile" onClick={() => navigateOps("/timesheets")}>
+              <strong>My Timesheet</strong>
+              <span>Open your timesheet summary</span>
+            </button>
             <button type="button" className="opsLandingTile" onClick={() => navigateOps("/projects")}>
               <strong>Projects</strong>
               <span>Open project overview</span>
