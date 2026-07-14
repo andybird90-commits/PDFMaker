@@ -5524,6 +5524,13 @@ function App() {
 
         content = (
           <div className="opsProjectWorkspace">
+            {workspaceSection !== "hub" ? (
+              <section className="opsProjectTopActions">
+                <button type="button" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}`)}>
+                  Project Home
+                </button>
+              </section>
+            ) : null}
             {workspaceContent}
           </div>
         );
