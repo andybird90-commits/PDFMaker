@@ -1264,9 +1264,9 @@ label {
 
 .opsWorkspace3Col {
   display: grid;
-  grid-template-columns: 260px minmax(420px, 1fr) minmax(420px, 1.2fr);
+  grid-template-columns: 1fr;
   gap: 0.8rem;
-  min-height: 68vh;
+  min-height: auto;
 }
 
 .opsWorkspacePanel {
@@ -1410,22 +1410,12 @@ label {
   .opsProjectTableRow {
     grid-template-columns: 1fr;
   }
-  .opsWorkspace3Col {
-    grid-template-columns: 1fr;
-    min-height: auto;
-  }
   .opsOverviewGrid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (min-width: 768px) and (max-width: 1099px) {
-  .opsWorkspace3Col {
-    grid-template-columns: 320px 1fr;
-  }
-  .opsWorkspace3Col > :nth-child(3) {
-    grid-column: 1 / -1;
-  }
 }
 
 .opsFolderGrid {
