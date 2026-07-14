@@ -163,6 +163,7 @@ type GpsSnapshot = {
   source: "device" | "entry";
 };
 type WeatherSnapshot = {
+  weatherCode: number;
   temperatureC: number;
   condition: string;
   rainChancePct: number | null;
@@ -574,6 +575,18 @@ function weatherCodeToLabel(code: number): string {
   if ([85, 86].includes(code)) return "Snow showers";
   if ([95, 96, 99].includes(code)) return "Thunderstorm";
   return "Weather update";
+}
+
+function weatherCodeToIcon(code: number): string {
+  if (code === 0) return "☀️";
+  if ([1, 2].includes(code)) return "⛅";
+  if (code === 3) return "☁️";
+  if ([45, 48].includes(code)) return "🌫️";
+  if ([51, 53, 55, 56, 57].includes(code)) return "🌦️";
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "🌧️";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "❄️";
+  if ([95, 96, 99].includes(code)) return "⛈️";
+  return "🌤️";
 }
 
 function getGreetingForHour(hour24: number): string {
@@ -2244,11 +2257,13 @@ function App() {
       if (typeof tempC !== "number") {
         throw new Error("Missing weather temperature data");
       }
+      const weatherCode = payload.current?.weather_code ?? 0;
       const windRaw = payload.current?.wind_speed_10m;
       const windMph = typeof windRaw === "number" ? Math.round(windRaw * 0.621371) : null;
       setWeather({
+        weatherCode,
         temperatureC: Math.round(tempC),
-        condition: weatherCodeToLabel(payload.current?.weather_code ?? 0),
+        condition: weatherCodeToLabel(weatherCode),
         rainChancePct:
           typeof payload.daily?.precipitation_probability_max?.[0] === "number"
             ? Math.round(payload.daily.precipitation_probability_max[0] ?? 0)
@@ -4613,6 +4628,7 @@ function App() {
       pageSubtitle = "Choose a module";
       const now = new Date();
       const greeting = getGreetingForHour(now.getHours());
+      const weatherIcon = weather ? weatherCodeToIcon(weather.weatherCode) : "⛅";
       content = (
         <div className="opsHomeStack">
           <section className="opsWeatherWidget">
@@ -4624,6 +4640,9 @@ function App() {
               <span>{formatLongDateUk(now)}</span>
             </div>
             <div className="opsWeatherMetric">
+              <div className="opsWeatherVisual" aria-hidden="true">
+                {weatherIcon}
+              </div>
               <strong>{weather ? `${weather.temperatureC}°C` : "—"}</strong>
               <span>{weatherLoading ? "Loading weather…" : weather?.condition ?? "Weather unavailable"}</span>
               <small>{weather && weather.highC != null && weather.lowC != null ? `↑ ${weather.highC}°  ↓ ${weather.lowC}°` : " "}</small>

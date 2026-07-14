@@ -906,6 +906,12 @@ label {
   line-height: 1.05;
 }
 
+.opsWeatherVisual {
+  font-size: 1.45rem;
+  line-height: 1;
+  margin-bottom: 0.2rem;
+}
+
 .opsWeatherMetric span {
   display: block;
   margin-top: 0.2rem;
