@@ -1182,10 +1182,10 @@ function App() {
           const [workersRes, entriesRes, foldersRes, filesRes] = await Promise.all([
             supabase.from("workers").select("id,name,role").order("created_at", { ascending: false }),
             supabase.from("time_entries").select("id,worker_id,action,at,note").order("at", { ascending: false }),
-            supabase.from("folders").select("id,name,parent_id").order("created_at", { ascending: false }),
+            supabase.from("folders").select("id,project_id,name,parent_id").order("created_at", { ascending: false }),
             supabase
               .from("project_files")
-              .select("id,folder_id,name,status,updated_at")
+              .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
               .order("updated_at", { ascending: false }),
           ]);
           if (workersRes.error) throw workersRes.error;
@@ -1206,19 +1206,20 @@ function App() {
           }));
           const loadedFolders = (foldersRes.data ?? []).map((row) => ({
             id: row.id,
-            projectId: selectedProjectId || DEFAULT_PROJECTS[0].id,
+            projectId: row.project_id ?? selectedProjectId ?? DEFAULT_PROJECTS[0].id,
             name: row.name,
             parentId: row.parent_id,
           }));
           const loadedFiles = (filesRes.data ?? []).map((row) => ({
             id: row.id,
-            projectId: selectedProjectId || DEFAULT_PROJECTS[0].id,
+            projectId: row.project_id ?? selectedProjectId ?? DEFAULT_PROJECTS[0].id,
             folderId: row.folder_id,
             name: row.name,
             status: row.status,
             updatedAt: row.updated_at,
-            uploadedBy: currentUser.name,
-            version: 1,
+            mimeType: row.mime_type ?? undefined,
+            uploadedBy: row.uploaded_by ?? currentUser.name,
+            version: row.version ?? 1,
           }));
           setWorkers(loadedWorkers);
           setTimeEntries(loadedEntries);
@@ -2427,13 +2428,13 @@ function App() {
       try {
         const { data, error } = await supabase
           .from("folders")
-          .insert({ name, parent_id: parentId })
-          .select("id,name,parent_id")
+          .insert({ project_id: selectedProjectId, name, parent_id: parentId })
+          .select("id,project_id,name,parent_id")
           .single();
         if (error) throw error;
         const folder: FolderNode = {
           id: data.id,
-          projectId: selectedProjectId,
+          projectId: data.project_id ?? selectedProjectId,
           name: data.name,
           parentId: data.parent_id,
         };
@@ -2557,7 +2558,7 @@ function App() {
     setFolders((prev) => [...records, ...prev]);
     if (hasSupabaseConfig && supabase) {
       for (const folder of records) {
-        await supabase.from("folders").insert({ id: folder.id, name: folder.name, parent_id: folder.parentId });
+        await supabase.from("folders").insert({ id: folder.id, project_id: folder.projectId, name: folder.name, parent_id: folder.parentId });
       }
     }
   }
@@ -2705,28 +2706,62 @@ function App() {
       setOpsLoading(true);
       try {
         const now = new Date().toISOString();
+        const insertRecord = {
+          project_id: selectedProjectId,
+          folder_id: targetFolderId,
+          name,
+          mime_type: override?.mimeType ?? null,
+          uploaded_by: override?.uploadedBy ?? currentUser.name,
+          version: 1,
+          status: "Draft",
+          updated_at: now,
+        };
         const { data, error } = await supabase
           .from("project_files")
-          .insert({
-            folder_id: targetFolderId,
-            name,
-            status: "Draft",
-            updated_at: now,
-          })
-          .select("id,folder_id,name,status,updated_at")
+          .insert(insertRecord)
+          .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
           .single();
-        if (error) throw error;
+        if (error) {
+          const message = error.message.toLowerCase();
+          if (targetFolderId && message.includes("foreign key")) {
+            const retry = await supabase
+              .from("project_files")
+              .insert({ ...insertRecord, folder_id: null })
+              .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
+              .single();
+            if (retry.error) throw retry.error;
+            const retried = retry.data;
+            const file: ProjectFile = {
+              id: retried.id,
+              projectId: retried.project_id ?? selectedProjectId,
+              folderId: retried.folder_id,
+              name: retried.name,
+              status: retried.status,
+              updatedAt: retried.updated_at,
+              mimeType: retried.mime_type ?? override?.mimeType,
+              dataUrl: override?.dataUrl,
+              uploadedBy: retried.uploaded_by ?? override?.uploadedBy ?? currentUser.name,
+              version: retried.version ?? 1,
+            };
+            setProjectFiles((prev) => [file, ...prev]);
+            setNewFileName("");
+            logProjectActivity("file uploaded", file.name, selectedProjectId);
+            notify(`Added file ${file.name} (saved to root folder).`);
+            return file;
+          }
+          throw error;
+        }
         const file: ProjectFile = {
           id: data.id,
-          projectId: selectedProjectId,
+          projectId: data.project_id ?? selectedProjectId,
           folderId: data.folder_id,
           name: data.name,
           status: data.status,
           updatedAt: data.updated_at,
-          mimeType: override?.mimeType,
+          mimeType: data.mime_type ?? override?.mimeType,
           dataUrl: override?.dataUrl,
-          uploadedBy: override?.uploadedBy ?? currentUser.name,
-          version: 1,
+          uploadedBy: data.uploaded_by ?? override?.uploadedBy ?? currentUser.name,
+          version: data.version ?? 1,
         };
         setProjectFiles((prev) => [file, ...prev]);
         setNewFileName("");
@@ -3077,7 +3112,11 @@ function App() {
     notify(`Exported ${template.name}.`);
   }
 
-  async function handleProjectFileUpload(files: FileList | File[] | null, targetFileId?: string): Promise<void> {
+  async function handleProjectFileUpload(
+    files: FileList | File[] | null,
+    targetFileId?: string,
+    folderOverride?: string | null,
+  ): Promise<void> {
     if (!files || files.length === 0) return;
     if (!projectPermission.uploadFiles) {
       notify("You do not have permission to upload files.");
@@ -3094,7 +3133,7 @@ function App() {
           projectFiles.find(
           (projectFile) =>
             projectFile.projectId === selectedProjectId &&
-            projectFile.folderId === selectedFolderId &&
+            projectFile.folderId === (folderOverride ?? selectedFolderId) &&
             projectFile.name.toLowerCase() === file.name.toLowerCase(),
         );
         if (existing) {
@@ -3128,6 +3167,7 @@ function App() {
           dataUrl,
           uploadedBy: currentUser.name,
           fileSize: file.size,
+          folderId: folderOverride ?? selectedFolderId,
         });
         uploadedCount += 1;
       } catch (error) {
@@ -5135,7 +5175,7 @@ function App() {
                   accept=".pdf,.dwg,.dxf,.ifc,.rvt,image/*"
                   className="hiddenInput"
                   onChange={(event) => {
-                    void handleProjectFileUpload(event.target.files, versionUploadTargetId ?? undefined);
+                    void handleProjectFileUpload(event.target.files, versionUploadTargetId ?? undefined, null);
                     event.currentTarget.value = "";
                   }}
                 />
