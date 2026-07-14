@@ -6048,6 +6048,22 @@ function App() {
     return renderAuthGate();
   }
 
+  if (showDailyIntroVideo) {
+    return (
+      <main className="dailyIntroScreen" aria-label="Daily intro loading screen">
+        <section className="dailyIntroShell">
+          <button type="button" className="dailyIntroClose" onClick={() => setShowDailyIntroVideo(false)}>
+            Enter app
+          </button>
+          <video className="dailyIntroVideo" autoPlay playsInline controls onEnded={() => setShowDailyIntroVideo(false)}>
+            <source src={DAILY_INTRO_VIDEO_PATH} type="video/mp4" />
+            Your browser does not support MP4 playback.
+          </video>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <div className="app">
       <header className="appShellHeader">
@@ -6075,19 +6091,6 @@ function App() {
           </button>
         </div>
       </header>
-      {showDailyIntroVideo ? (
-        <div className="dailyIntroOverlay" role="dialog" aria-modal="true" aria-label="Daily intro video">
-          <div className="dailyIntroCard">
-            <button type="button" className="dailyIntroClose" onClick={() => setShowDailyIntroVideo(false)}>
-              Close
-            </button>
-            <video className="dailyIntroVideo" autoPlay playsInline controls onEnded={() => setShowDailyIntroVideo(false)}>
-              <source src={DAILY_INTRO_VIDEO_PATH} type="video/mp4" />
-              Your browser does not support MP4 playback.
-            </video>
-          </div>
-        </div>
-      ) : null}
       {activeModule === "markup-studio" ? (
       <>
       <header className="toolbar">
