@@ -1327,6 +1327,12 @@ label {
   overflow: auto;
 }
 
+.opsWorkspacePanel .opsInline button.active {
+  color: #f8fafc;
+  background: rgba(59, 130, 246, 0.36);
+  border-color: rgba(147, 197, 253, 0.85);
+}
+
 .opsFilePrimary {
   flex: 1;
   text-align: left;
