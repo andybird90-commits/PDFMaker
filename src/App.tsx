@@ -180,7 +180,7 @@ type OpsRoute =
   | {
       name: "projects";
       projectId?: string;
-      section?: "hub" | "files" | "forms" | "materials" | "progress" | "snagging" | "file-open";
+      section?: "hub" | "files" | "drawings" | "forms" | "materials" | "progress" | "snagging" | "file-open";
       fileId?: string;
     }
   | { name: "forms"; formId?: string; submissionId?: string; mode?: "fill" | "view" | "export" };
@@ -637,6 +637,7 @@ function isOpsPath(pathname: string): boolean {
     pathname === "/projects" ||
     /^\/projects\/[^/]+$/.test(pathname) ||
     /^\/projects\/[^/]+\/files$/.test(pathname) ||
+    /^\/projects\/[^/]+\/drawings$/.test(pathname) ||
     /^\/projects\/[^/]+\/forms$/.test(pathname) ||
     /^\/projects\/[^/]+\/materials$/.test(pathname) ||
     /^\/projects\/[^/]+\/progress$/.test(pathname) ||
@@ -659,6 +660,10 @@ function parseOpsRoute(pathname: string): OpsRoute {
   if (/^\/projects\/[^/]+\/files$/.test(pathname)) {
     const parts = pathname.split("/");
     return { name: "projects", projectId: parts[2], section: "files" };
+  }
+  if (/^\/projects\/[^/]+\/drawings$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "drawings" };
   }
   if (/^\/projects\/[^/]+\/forms$/.test(pathname)) {
     const parts = pathname.split("/");
@@ -5016,6 +5021,19 @@ function App() {
         const workspaceProjectId = workspaceProject?.id ?? selectedProjectId;
         const workspaceFolders = folders.filter((folder) => folder.projectId === workspaceProjectId);
         const fileMoveTarget = fileMoveDialog ? projectFiles.find((file) => file.id === fileMoveDialog.fileId) ?? null : null;
+        const projectDrawingFiles = projectFiles
+          .filter((file) => {
+            if (file.projectId !== workspaceProjectId) return false;
+            const lowerName = file.name.toLowerCase();
+            return (
+              lowerName.endsWith(".pdf") ||
+              lowerName.endsWith(".dwg") ||
+              lowerName.endsWith(".dxf") ||
+              lowerName.endsWith(".ifc") ||
+              lowerName.endsWith(".rvt")
+            );
+          })
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         const projectCommissioningSubmissions = commissioningSubmissions
           .filter((item) => item.projectId === workspaceProjectId)
           .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -5096,6 +5114,48 @@ function App() {
               ) : (
                 <p>File not found.</p>
               )}
+            </section>
+          );
+        } else if (workspaceSection === "drawings") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <h3>Drawings</h3>
+              <p className="opsSubtle">Drawing register for this project. Open a drawing directly from this list.</p>
+              <div className="opsInline">
+                <button type="button" onClick={() => projectUploadInputRef.current?.click()} disabled={!projectPermission.uploadFiles}>
+                  Upload Drawings
+                </button>
+                <button type="button" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
+                  Open Files Manager
+                </button>
+              </div>
+              <div className="opsList">
+                {projectDrawingFiles.map((file) => (
+                  <div key={file.id} className="opsListRow">
+                    <div>
+                      <strong>{file.name}</strong>
+                      <small>
+                        {formatDateUk(file.updatedAt)} • By {file.uploadedBy ?? currentUser.name}
+                      </small>
+                    </div>
+                    <div className="opsInline">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProjectFileId(file.id);
+                          void openProjectFileFullView(file, workspaceProject?.slug ?? "project");
+                        }}
+                      >
+                        Open
+                      </button>
+                      <button type="button" onClick={() => downloadProjectFile(file)}>
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {projectDrawingFiles.length === 0 ? <p>No drawings uploaded yet.</p> : null}
+              </div>
             </section>
           );
         } else if (workspaceSection === "files") {
@@ -5341,7 +5401,7 @@ function App() {
                 <strong>Files</strong>
                 <span>Open full filing structure</span>
               </button>
-              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/drawings`)}>
                 <strong>Drawings</strong>
                 <span>Open drawing files and markups</span>
               </button>
