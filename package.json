@@ -1,0 +1,38 @@
+{
+  "name": "pdfmaker",
+  "version": "1.0.0",
+  "description": "PDF.js annotation editor",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:open": "vite --open",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andybird90-commits/PDFMaker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/andybird90-commits/PDFMaker/issues"
+  },
+  "homepage": "https://github.com/andybird90-commits/PDFMaker#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.2",
+    "fabric": "^7.4.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4"
+  }
+}
