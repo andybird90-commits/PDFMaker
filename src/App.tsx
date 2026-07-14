@@ -202,6 +202,8 @@ const MIN_SCALE = 0.4;
 const MAX_SCALE = 4;
 const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
 const OPS_STORAGE_KEY = "mep-ops.local.v1";
+const DAILY_INTRO_VIDEO_PATH = "/replicate-prediction-f9s42e48m9rmw0cxz73ag0gahr.mp4";
+const DAILY_INTRO_SEEN_KEY_PREFIX = "mep-ops.daily-intro.v1";
 const PIN_STATUS_COLOR: Record<PinStatus, string> = {
   open: "#dc2626",
   in_progress: "#2563eb",
@@ -563,6 +565,15 @@ function formatLongDateUk(value: string | number | Date): string {
   });
 }
 
+function getLocalDayKey(value: string | number | Date): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "invalid-date";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function weatherCodeToLabel(code: number): string {
   if (code === 0) return "Clear sky";
   if ([1, 2].includes(code)) return "Partly cloudy";
@@ -751,6 +762,7 @@ function App() {
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
   const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
+  const [showDailyIntroVideo, setShowDailyIntroVideo] = useState<boolean>(false);
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -1342,6 +1354,24 @@ function App() {
 
     setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
   }, [authSession, authWorkerId, authWorker, currentUser.name]);
+
+  useEffect(() => {
+    if (!authSession) {
+      setShowDailyIntroVideo(false);
+      return;
+    }
+    const identity = authSession.user?.email?.trim().toLowerCase() || authSession.user?.id || currentUser.email.toLowerCase();
+    if (!identity) return;
+    const todayKey = getLocalDayKey(new Date());
+    const storageKey = `${DAILY_INTRO_SEEN_KEY_PREFIX}:${identity}`;
+    const seenToday = window.localStorage.getItem(storageKey);
+    if (seenToday === todayKey) {
+      setShowDailyIntroVideo(false);
+      return;
+    }
+    window.localStorage.setItem(storageKey, todayKey);
+    setShowDailyIntroVideo(true);
+  }, [authSession, currentUser.email]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -6045,6 +6075,19 @@ function App() {
           </button>
         </div>
       </header>
+      {showDailyIntroVideo ? (
+        <div className="dailyIntroOverlay" role="dialog" aria-modal="true" aria-label="Daily intro video">
+          <div className="dailyIntroCard">
+            <button type="button" className="dailyIntroClose" onClick={() => setShowDailyIntroVideo(false)}>
+              Close
+            </button>
+            <video className="dailyIntroVideo" autoPlay playsInline controls onEnded={() => setShowDailyIntroVideo(false)}>
+              <source src={DAILY_INTRO_VIDEO_PATH} type="video/mp4" />
+              Your browser does not support MP4 playback.
+            </video>
+          </div>
+        </div>
+      ) : null}
       {activeModule === "markup-studio" ? (
       <>
       <header className="toolbar">

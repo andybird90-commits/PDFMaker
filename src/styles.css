@@ -1508,6 +1508,38 @@ label {
   word-break: break-word;
 }
 
+.dailyIntroOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 6, 23, 0.82);
+  padding: 1rem;
+}
+
+.dailyIntroCard {
+  width: min(1000px, calc(100vw - 2rem));
+  border: 1px solid #2b425e;
+  border-radius: 14px;
+  background: #061223;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.dailyIntroClose {
+  justify-self: end;
+}
+
+.dailyIntroVideo {
+  width: 100%;
+  max-height: min(80vh, 720px);
+  border-radius: 10px;
+  background: #000000;
+}
+
 .opsFolderList {
   display: flex;
   flex-direction: column;
