@@ -5809,17 +5809,9 @@ function App() {
         </aside>
 
         <div className="opsAppMain">
-          <header className="opsPageHeader">
-            <div>
-              <h1>{pageTitle}</h1>
-              <p>{pageSubtitle}</p>
-            </div>
-            <div className="opsHeaderMeta">
-              <span>{formatDateUk(new Date())}</span>
-              <span>{currentUser.name}</span>
-            </div>
-          </header>
-          <section className="opsPageContent">{content}</section>
+          <section className="opsPageContent" aria-label={pageTitle} data-page-subtitle={pageSubtitle}>
+            {content}
+          </section>
         </div>
 
         <nav className="opsMobileBottomNav">
