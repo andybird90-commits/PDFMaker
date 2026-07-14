@@ -4906,18 +4906,9 @@ function App() {
                 <div className="opsProjectTableHead">
                   <span>Project</span>
                   <span>Client</span>
-                  <span>Code</span>
-                  <span>Address</span>
                   <span>Manager</span>
-                  <span>Status</span>
-                  <span>Last activity</span>
-                  <span>Files</span>
-                  <span>Team</span>
                 </div>
                 {filteredProjects.map((project) => {
-                  const filesCount = projectFiles.filter((file) => file.projectId === project.id).length;
-                  const teamCount = projectMembers.filter((member) => member.projectId === project.id).length;
-                  const lastActivity = projectActivities.find((activity) => activity.projectId === project.id);
                   return (
                     <button
                       key={project.id}
@@ -4934,26 +4925,8 @@ function App() {
                       <span className="opsProjectCell" data-label="Client">
                         {project.client}
                       </span>
-                      <span className="opsProjectCell" data-label="Code">
-                        {project.code}
-                      </span>
-                      <span className="opsProjectCell" data-label="Address">
-                        {project.address}
-                      </span>
                       <span className="opsProjectCell" data-label="Manager">
                         {project.manager}
-                      </span>
-                      <span className="opsProjectCell" data-label="Status">
-                        {project.status}
-                      </span>
-                      <span className="opsProjectCell" data-label="Last activity">
-                        {lastActivity ? formatDateTimeUk(lastActivity.at) : "-"}
-                      </span>
-                      <span className="opsProjectCell" data-label="Files">
-                        {filesCount}
-                      </span>
-                      <span className="opsProjectCell" data-label="Team">
-                        {teamCount}
                       </span>
                     </button>
                   );
