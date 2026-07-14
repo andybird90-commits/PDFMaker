@@ -177,7 +177,12 @@ type OpsRoute =
   | { name: "sign-in" }
   | { name: "sign-out" }
   | { name: "timesheets"; date?: string }
-  | { name: "projects"; projectId?: string; section?: "files" | "file-open"; fileId?: string }
+  | {
+      name: "projects";
+      projectId?: string;
+      section?: "hub" | "files" | "forms" | "materials" | "progress" | "snagging" | "file-open";
+      fileId?: string;
+    }
   | { name: "forms"; formId?: string; submissionId?: string; mode?: "fill" | "view" | "export" };
 type BatchDocument = {
   id: string;
@@ -628,6 +633,10 @@ function isOpsPath(pathname: string): boolean {
     pathname === "/projects" ||
     /^\/projects\/[^/]+$/.test(pathname) ||
     /^\/projects\/[^/]+\/files$/.test(pathname) ||
+    /^\/projects\/[^/]+\/forms$/.test(pathname) ||
+    /^\/projects\/[^/]+\/materials$/.test(pathname) ||
+    /^\/projects\/[^/]+\/progress$/.test(pathname) ||
+    /^\/projects\/[^/]+\/snagging$/.test(pathname) ||
     /^\/projects\/[^/]+\/files\/[^/]+$/.test(pathname) ||
     pathname === "/forms" ||
     /^\/forms\/[^/]+\/fill$/.test(pathname) ||
@@ -647,11 +656,27 @@ function parseOpsRoute(pathname: string): OpsRoute {
     const parts = pathname.split("/");
     return { name: "projects", projectId: parts[2], section: "files" };
   }
+  if (/^\/projects\/[^/]+\/forms$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "forms" };
+  }
+  if (/^\/projects\/[^/]+\/materials$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "materials" };
+  }
+  if (/^\/projects\/[^/]+\/progress$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "progress" };
+  }
+  if (/^\/projects\/[^/]+\/snagging$/.test(pathname)) {
+    const parts = pathname.split("/");
+    return { name: "projects", projectId: parts[2], section: "snagging" };
+  }
   if (/^\/projects\/[^/]+\/files\/[^/]+$/.test(pathname)) {
     const parts = pathname.split("/");
     return { name: "projects", projectId: parts[2], section: "file-open", fileId: decodeURIComponent(parts[4]) };
   }
-  if (/^\/projects\/[^/]+$/.test(pathname)) return { name: "projects", projectId: pathname.split("/")[2] };
+  if (/^\/projects\/[^/]+$/.test(pathname)) return { name: "projects", projectId: pathname.split("/")[2], section: "hub" };
   if (pathname === "/forms") return { name: "forms" };
   if (/^\/forms\/[^/]+\/fill$/.test(pathname)) return { name: "forms", formId: pathname.split("/")[2], mode: "fill" };
   if (/^\/forms\/submissions\/[^/]+\/export$/.test(pathname)) {
@@ -725,7 +750,6 @@ function App() {
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
   const [projectSearch, setProjectSearch] = useState<string>("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<Project["status"] | "all">("all");
-  const [projectWorkspaceTab, setProjectWorkspaceTab] = useState<"overview" | "files" | "team" | "forms" | "activity" | "settings">("files");
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [newFolderName, setNewFolderName] = useState<string>("");
@@ -897,13 +921,6 @@ function App() {
     () => projectFiles.find((file) => file.id === selectedProjectFileId) ?? null,
     [projectFiles, selectedProjectFileId],
   );
-  const selectedProjectActivity = useMemo(
-    () =>
-      projectActivities
-        .filter((entry) => entry.projectId === selectedProjectId)
-        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
-    [projectActivities, selectedProjectId],
-  );
   const selectedFileVersions = useMemo(
     () => projectFileVersions.filter((version) => version.fileId === (versionHistoryFileId ?? selectedProjectFileId)),
     [projectFileVersions, selectedProjectFileId, versionHistoryFileId],
@@ -1066,15 +1083,6 @@ function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  useEffect(() => {
-    if (opsRoute.name !== "projects" || !opsRoute.projectId) return;
-    if (opsRoute.section === "files") {
-      setProjectWorkspaceTab("files");
-    } else {
-      setProjectWorkspaceTab("files");
-    }
-  }, [opsRoute]);
 
   useEffect(() => {
     if (opsRoute.name === "projects" && opsRoute.section === "file-open" && opsRoute.fileId) {
@@ -2597,7 +2605,7 @@ function App() {
     setNewProjectStatus("active");
     setShowNewProjectModal(false);
     logProjectActivity("project created", project.name, project.id);
-    navigateOps(`/projects/${project.slug}/files`);
+    navigateOps(`/projects/${project.slug}`);
     notify(`Created project ${project.name}.`);
   }
 
@@ -4916,7 +4924,7 @@ function App() {
                       className="opsProjectTableRow"
                       onClick={() => {
                         setSelectedProjectId(project.id);
-                        navigateOps(`/projects/${project.slug}/files`);
+                        navigateOps(`/projects/${project.slug}`);
                       }}
                     >
                       <span className="opsProjectCell opsProjectCellProject" data-label="Project">
@@ -4998,31 +5006,12 @@ function App() {
         const workspaceProject = projects.find((project) => project.slug === route.projectId) ?? selectedProject;
         const workspaceProjectId = workspaceProject?.id ?? selectedProjectId;
         const workspaceFolders = folders.filter((folder) => folder.projectId === workspaceProjectId);
-        const workspaceFormsFolderIds = workspaceFolders
-          .filter((folder) => folder.name.toLowerCase().includes("form"))
-          .map((folder) => folder.id);
-        const projectFormFiles = projectFiles
-          .filter((file) => {
-            if (file.projectId !== workspaceProjectId) return false;
-            if (file.mimeType && !file.mimeType.includes("pdf")) return false;
-            if (workspaceFormsFolderIds.includes(file.folderId ?? "")) return true;
-            const fileName = file.name.toLowerCase();
-            return FORM_TEMPLATES.some((template) => fileName === template.fileName.toLowerCase() || fileName.includes(template.id));
-          })
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         const projectCommissioningSubmissions = commissioningSubmissions
           .filter((item) => item.projectId === workspaceProjectId)
           .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         const activeTemplate = activeFormId ? FORM_TEMPLATES.find((template) => template.id === activeFormId) ?? null : null;
         const activeTemplateSections = activeTemplate ? getTemplateSections(activeTemplate.id) : [];
-        const projectTabItems: Array<{ id: typeof projectWorkspaceTab; label: string }> = [
-          { id: "overview", label: "Overview" },
-          { id: "files", label: "Files" },
-          { id: "team", label: "Team" },
-          { id: "forms", label: "Forms" },
-          { id: "activity", label: "Activity" },
-          { id: "settings", label: "Settings" },
-        ];
+        const workspaceSection = route.section ?? "hub";
 
         const renderFolderTree = (parentId: string | null, depth = 0): ReactElement[] => {
           const nodes = workspaceFolders
@@ -5082,7 +5071,7 @@ function App() {
           : "Project document-management workspace";
 
         let workspaceContent: ReactElement = <div />;
-        if (route.section === "file-open" && route.fileId) {
+        if (workspaceSection === "file-open" && route.fileId) {
           const openFile = projectFiles.find((file) => file.id === route.fileId) ?? null;
           workspaceContent = (
             <section className="opsPanel opsOpenFileView">
@@ -5118,7 +5107,7 @@ function App() {
               )}
             </section>
           );
-        } else if (projectWorkspaceTab === "files") {
+        } else if (workspaceSection === "files") {
           const activeFolderName =
             selectedFolderId === null ? "All folders" : workspaceFolders.find((folder) => folder.id === selectedFolderId)?.name ?? "Folder";
           workspaceContent = (
@@ -5329,55 +5318,57 @@ function App() {
               </section>
             </div>
           );
-        } else if (projectWorkspaceTab === "overview") {
+        } else if (workspaceSection === "hub") {
           workspaceContent = (
-            <div className="opsOverviewGrid">
-              <section className="opsPanel">
-                <h3>Project Details</h3>
-                <p>Manager: {workspaceProject?.manager}</p>
-                <p>Status: {workspaceProject?.status}</p>
-                <p>Start: {workspaceProject?.startDate}</p>
-                <p>Target: {workspaceProject?.targetDate || "-"}</p>
-                <p>{workspaceProject?.description || "No description."}</p>
-              </section>
-              <section className="opsPanel">
-                <h3>Summary</h3>
-                <p>Files: {projectFiles.filter((file) => file.projectId === workspaceProjectId).length}</p>
-                <p>Forms: {projectFormFiles.length + projectCommissioningSubmissions.length}</p>
-                <p>Timesheet hours: {formatMinutes(timeSummary.totalMinutes)}</p>
-              </section>
+            <div className="opsLandingTiles">
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
+                <strong>Files</strong>
+                <span>Open full filing structure</span>
+              </button>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
+                <strong>Drawings</strong>
+                <span>Open drawing files and markups</span>
+              </button>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/forms`)}>
+                <strong>Forms</strong>
+                <span>Open project forms register</span>
+              </button>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/materials`)}>
+                <strong>Materials</strong>
+                <span>Open materials workspace</span>
+              </button>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/progress`)}>
+                <strong>Progress</strong>
+                <span>Open progress workspace</span>
+              </button>
+              <button type="button" className="opsLandingTile" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/snagging`)}>
+                <strong>Snagging</strong>
+                <span>Open snagging workspace</span>
+              </button>
             </div>
           );
-        } else if (projectWorkspaceTab === "team") {
+        } else if (workspaceSection === "materials") {
           workspaceContent = (
             <section className="opsPanel">
-              <table className="opsTable">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Permission</th>
-                    <th>Date added</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedProjectMembers.map((member) => (
-                    <tr key={member.id}>
-                      <td>{member.name}</td>
-                      <td>{member.email}</td>
-                      <td>{member.role}</td>
-                      <td>{member.permission.manageTeam ? "Manage" : "Limited"}</td>
-                      <td>{formatDateUk(member.dateAdded)}</td>
-                      <td>{member.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <h3>Materials</h3>
+              <p className="opsSubtle">Materials workspace page placeholder. Next step: build stock, deliveries, and usage tracking.</p>
             </section>
           );
-        } else if (projectWorkspaceTab === "forms") {
+        } else if (workspaceSection === "progress") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <h3>Progress</h3>
+              <p className="opsSubtle">Progress workspace page placeholder. Next step: build weekly progress updates and reporting.</p>
+            </section>
+          );
+        } else if (workspaceSection === "snagging") {
+          workspaceContent = (
+            <section className="opsPanel">
+              <h3>Snagging</h3>
+              <p className="opsSubtle">Snagging workspace page placeholder. Next step: build snag list, status workflow, and closures.</p>
+            </section>
+          );
+        } else if (workspaceSection === "forms") {
           workspaceContent = (
             <div className="opsOverviewGrid">
               <section className="opsPanel">
@@ -5522,29 +5513,11 @@ function App() {
               ) : null}
             </div>
           );
-        } else if (projectWorkspaceTab === "activity") {
-          workspaceContent = (
-            <section className="opsPanel">
-              <div className="opsList">
-                {selectedProjectActivity.map((entry) => (
-                  <div key={entry.id} className="opsListRow">
-                    <div>
-                      <strong>{entry.action}</strong>
-                      <small>{entry.item}</small>
-                      <small>{entry.user}</small>
-                    </div>
-                    <span>{formatDateTimeUk(entry.at)}</span>
-                  </div>
-                ))}
-                {selectedProjectActivity.length === 0 ? <p>No project activity yet.</p> : null}
-              </div>
-            </section>
-          );
         } else {
           workspaceContent = (
             <section className="opsPanel">
-              <h3>Settings</h3>
-              <p>Project permissions and configuration controls are managed here.</p>
+              <h3>Project hub</h3>
+              <p className="opsSubtle">Select one of the project tiles to continue.</p>
             </section>
           );
         }
@@ -5569,13 +5542,6 @@ function App() {
                   More actions
                 </button>
               </div>
-            </section>
-            <section className="opsProjectTabs">
-              {projectTabItems.map((tab) => (
-                <button key={tab.id} type="button" className={projectWorkspaceTab === tab.id ? "active" : ""} onClick={() => setProjectWorkspaceTab(tab.id)}>
-                  {tab.label}
-                </button>
-              ))}
             </section>
             {workspaceContent}
           </div>
