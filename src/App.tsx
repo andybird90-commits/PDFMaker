@@ -120,6 +120,7 @@ type ProjectFile = {
   updatedAt: string;
   status: string;
   mimeType?: string;
+  storagePath?: string;
   dataUrl?: string;
   uploadedBy?: string;
   version?: number;
@@ -428,7 +429,7 @@ const COMMISSIONING_TEMPLATE_SECTIONS: Record<string, CommissioningSection[]> = 
 };
 const DEFAULT_PROJECTS: Project[] = [
   {
-    id: "proj-1",
+    id: "2cfd37e0-a95d-4bd7-bf89-0ab8c66f6f41",
     slug: "new-street-square",
     name: "New Street Square",
     code: "NSS",
@@ -441,7 +442,7 @@ const DEFAULT_PROJECTS: Project[] = [
     description: "City-centre mixed-use development.",
   },
   {
-    id: "proj-2",
+    id: "4ff1132b-c6f2-47d5-b22d-c2f20e62ab8b",
     slug: "one-crown-place",
     name: "One Crown Place",
     code: "OCP",
