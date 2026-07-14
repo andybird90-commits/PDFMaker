@@ -10,6 +10,7 @@
     sans-serif;
   color: #e5e7eb;
   background: #171b22;
+  --app-bg-image: url("/app background.png");
 }
 
 * {
@@ -18,7 +19,14 @@
 
 body {
   margin: 0;
-  background: #171b22;
+  background-color: #171b22;
+  background-image:
+    linear-gradient(180deg, rgba(4, 10, 20, 0.78), rgba(4, 10, 20, 0.82)),
+    var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 .app {
@@ -237,14 +245,14 @@ label {
 
 .viewer {
   padding: 0.8rem;
-  background: #171b22;
+  background: transparent;
 }
 
 .opsMain {
   padding: 1rem;
   display: grid;
   gap: 1rem;
-  background: #171b22;
+  background: transparent;
 }
 
 .opsExperience {
@@ -643,9 +651,15 @@ label {
   display: grid;
   grid-template-columns: 1fr;
   background:
+    linear-gradient(180deg, rgba(3, 9, 20, 0.74), rgba(3, 9, 20, 0.8)),
     radial-gradient(circle at 10% -20%, rgba(14, 165, 233, 0.14), transparent 40%),
     radial-gradient(circle at 100% 0%, rgba(99, 102, 241, 0.1), transparent 35%),
-    #081325;
+    var(--app-bg-image);
+  background-color: #081325;
+  background-size: cover, auto, auto, cover;
+  background-position: center, 10% -20%, 100% 0, center;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed, fixed;
   color: #e2e8f0;
 }
 
@@ -1285,7 +1299,14 @@ label {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: radial-gradient(circle at top, #0f1f35 0%, #081324 45%, #050b16 100%);
+  background:
+    linear-gradient(180deg, rgba(5, 12, 23, 0.78), rgba(5, 12, 23, 0.84)),
+    radial-gradient(circle at top, rgba(15, 31, 53, 0.7) 0%, rgba(8, 19, 36, 0.82) 45%, rgba(5, 11, 22, 0.9) 100%),
+    var(--app-bg-image);
+  background-size: cover, cover, cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 .authCard {
