@@ -162,6 +162,15 @@ type GpsSnapshot = {
   capturedAt: string;
   source: "device" | "entry";
 };
+type WeatherSnapshot = {
+  temperatureC: number;
+  condition: string;
+  rainChancePct: number | null;
+  windMph: number | null;
+  highC: number | null;
+  lowC: number | null;
+  updatedAt: string;
+};
 type OpsRoute =
   | { name: "home" }
   | { name: "sign-in" }
@@ -518,6 +527,61 @@ function formatMinutes(totalMinutes: number): string {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
+function formatDateUk(value: string | number | Date): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-GB");
+}
+
+function formatDateTimeUk(value: string | number | Date): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function formatTimeUk(value: string | number | Date): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatLongDateUk(value: string | number | Date): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function weatherCodeToLabel(code: number): string {
+  if (code === 0) return "Clear sky";
+  if ([1, 2].includes(code)) return "Partly cloudy";
+  if (code === 3) return "Overcast";
+  if ([45, 48].includes(code)) return "Fog";
+  if ([51, 53, 55, 56, 57].includes(code)) return "Drizzle";
+  if ([61, 63, 65, 66, 67].includes(code)) return "Rain";
+  if ([71, 73, 75, 77].includes(code)) return "Snow";
+  if ([80, 81, 82].includes(code)) return "Rain showers";
+  if ([85, 86].includes(code)) return "Snow showers";
+  if ([95, 96, 99].includes(code)) return "Thunderstorm";
+  return "Weather update";
+}
+
+function getGreetingForHour(hour24: number): string {
+  if (hour24 < 12) return "Good morning";
+  if (hour24 < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 function parseGpsNote(note?: string): { lat: number; lng: number; accuracyM: number } | null {
   if (!note || !note.startsWith("gps:")) return null;
   const payload = note.slice(4);
@@ -653,6 +717,9 @@ function App() {
   const [opsPathname, setOpsPathname] = useState<string>(() => window.location.pathname || "/home");
   const [opsTimesheetWindow, setOpsTimesheetWindow] = useState<"day" | "week">("day");
   const [liveGps, setLiveGps] = useState<GpsSnapshot | null>(null);
+  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState<boolean>(false);
+  const [weatherError, setWeatherError] = useState<string>("");
   const [selectedProjectFileId, setSelectedProjectFileId] = useState<string | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Record<string, boolean>>({});
   const [versionHistoryFileId, setVersionHistoryFileId] = useState<string | null>(null);
@@ -956,6 +1023,15 @@ function App() {
     if (activeModule !== "operations") return;
     if (opsRoute.name !== "sign-in" && opsRoute.name !== "sign-out") return;
     void refreshLiveGps();
+  }, [activeModule, opsRoute.name]);
+
+  useEffect(() => {
+    if (activeModule !== "operations" || opsRoute.name !== "home") return;
+    void refreshWeatherSnapshot();
+    const handle = window.setInterval(() => {
+      void refreshWeatherSnapshot();
+    }, 15 * 60 * 1000);
+    return () => window.clearInterval(handle);
   }, [activeModule, opsRoute.name]);
 
   useEffect(() => {
@@ -2129,6 +2205,68 @@ function App() {
     });
   }
 
+  async function refreshWeatherSnapshot(): Promise<void> {
+    if (typeof window === "undefined") return;
+    const fallbackCoords = { lat: 51.5072, lng: -0.1276 };
+    setWeatherLoading(true);
+    setWeatherError("");
+    try {
+      const coords = await new Promise<{ lat: number; lng: number }>((resolve) => {
+        if (!("geolocation" in navigator)) {
+          resolve(fallbackCoords);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (position) =>
+            resolve({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            }),
+          () => resolve(fallbackCoords),
+          { enableHighAccuracy: false, maximumAge: 15 * 60 * 1000, timeout: 4500 },
+        );
+      });
+
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lng}&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=auto`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Weather fetch failed: ${response.status}`);
+      }
+      const payload = (await response.json()) as {
+        current?: { temperature_2m?: number; weather_code?: number; wind_speed_10m?: number };
+        daily?: {
+          temperature_2m_max?: number[];
+          temperature_2m_min?: number[];
+          precipitation_probability_max?: number[];
+        };
+      };
+      const tempC = payload.current?.temperature_2m;
+      if (typeof tempC !== "number") {
+        throw new Error("Missing weather temperature data");
+      }
+      const windRaw = payload.current?.wind_speed_10m;
+      const windMph = typeof windRaw === "number" ? Math.round(windRaw * 0.621371) : null;
+      setWeather({
+        temperatureC: Math.round(tempC),
+        condition: weatherCodeToLabel(payload.current?.weather_code ?? 0),
+        rainChancePct:
+          typeof payload.daily?.precipitation_probability_max?.[0] === "number"
+            ? Math.round(payload.daily.precipitation_probability_max[0] ?? 0)
+            : null,
+        windMph,
+        highC:
+          typeof payload.daily?.temperature_2m_max?.[0] === "number" ? Math.round(payload.daily.temperature_2m_max[0] ?? 0) : null,
+        lowC:
+          typeof payload.daily?.temperature_2m_min?.[0] === "number" ? Math.round(payload.daily.temperature_2m_min[0] ?? 0) : null,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      setWeatherError("Weather unavailable right now.");
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
   async function addTimeEntry(workerId: string, action: "clock_in" | "clock_out"): Promise<void> {
     const worker = workerById[workerId];
     if (!worker) return;
@@ -2771,7 +2909,7 @@ function App() {
         size: 9,
         color: rgb(0.95, 0.97, 1),
       });
-      targetPage.drawText(`Updated: ${new Date(submission.updatedAt).toLocaleString()}`, {
+      targetPage.drawText(`Updated: ${formatDateTimeUk(submission.updatedAt)}`, {
         x: margin + 290,
         y: headerBottom + 14,
         size: 9,
@@ -4473,16 +4611,45 @@ function App() {
     if (route.name === "home") {
       pageTitle = "Operations Home";
       pageSubtitle = "Choose a module";
+      const now = new Date();
+      const greeting = getGreetingForHour(now.getHours());
       content = (
-        <div className="opsLandingTiles">
-          <button type="button" className="opsLandingTile" onClick={() => navigateOps("/sign-in")}>
-            <strong>Clock In / Out</strong>
-            <span>Open GPS attendance</span>
-          </button>
-          <button type="button" className="opsLandingTile" onClick={() => navigateOps("/projects")}>
-            <strong>Projects</strong>
-            <span>Open project overview</span>
-          </button>
+        <div className="opsHomeStack">
+          <section className="opsWeatherWidget">
+            <div className="opsWeatherPrimary">
+              <p>
+                {greeting}, {currentUser.name}
+              </p>
+              <strong>{formatTimeUk(now)}</strong>
+              <span>{formatLongDateUk(now)}</span>
+            </div>
+            <div className="opsWeatherMetric">
+              <strong>{weather ? `${weather.temperatureC}°C` : "—"}</strong>
+              <span>{weatherLoading ? "Loading weather…" : weather?.condition ?? "Weather unavailable"}</span>
+              <small>{weather && weather.highC != null && weather.lowC != null ? `↑ ${weather.highC}°  ↓ ${weather.lowC}°` : " "}</small>
+            </div>
+            <div className="opsWeatherMetric">
+              <strong>{weather?.rainChancePct != null ? `${weather.rainChancePct}%` : "—"}</strong>
+              <span>Chance of rain</span>
+            </div>
+            <div className="opsWeatherMetric">
+              <strong>{weather?.windMph != null ? `${weather.windMph} mph` : "—"}</strong>
+              <span>Wind</span>
+            </div>
+            <small className="opsSubtle">
+              {weatherError || (weather?.updatedAt ? `Updated ${formatTimeUk(weather.updatedAt)}` : "Weather refreshes automatically on this page.")}
+            </small>
+          </section>
+          <div className="opsLandingTiles">
+            <button type="button" className="opsLandingTile" onClick={() => navigateOps("/sign-in")}>
+              <strong>Clock In / Out</strong>
+              <span>Open GPS attendance</span>
+            </button>
+            <button type="button" className="opsLandingTile" onClick={() => navigateOps("/projects")}>
+              <strong>Projects</strong>
+              <span>Open project overview</span>
+            </button>
+          </div>
         </div>
       );
     } else if (route.name === "sign-out") {
@@ -4554,7 +4721,7 @@ function App() {
                     <div key={selectedWorker.id} className="opsListRow">
                       <div>
                         <strong>{selectedWorker.name}</strong>
-                        <small>Signed in: {signedAt ? signedAt.toLocaleString() : "-"}</small>
+                        <small>Signed in: {signedAt ? formatDateTimeUk(signedAt) : "-"}</small>
                         <small>Duration: {formatMinutes(elapsedMinutes)}</small>
                         <small>{gps ? `GPS ${gps.accuracyM}m` : "GPS unavailable"}</small>
                       </div>
@@ -4720,7 +4887,7 @@ function App() {
                         {project.status}
                       </span>
                       <span className="opsProjectCell" data-label="Last activity">
-                        {lastActivity ? new Date(lastActivity.at).toLocaleString() : "-"}
+                        {lastActivity ? formatDateTimeUk(lastActivity.at) : "-"}
                       </span>
                       <span className="opsProjectCell" data-label="Files">
                         {filesCount}
@@ -4999,7 +5166,7 @@ function App() {
                         <strong>{file.name}</strong>
                         <small>
                           Version {file.version ?? 1} • {file.mimeType ?? "Unknown"} • Updated{" "}
-                          {new Date(file.updatedAt).toLocaleDateString()} • By {file.uploadedBy ?? currentUser.name}
+                          {formatDateUk(file.updatedAt)} • By {file.uploadedBy ?? currentUser.name}
                         </small>
                       </button>
                       <div className="opsInline opsFileRowActions">
@@ -5090,7 +5257,7 @@ function App() {
                         <div key={version.id} className="opsListRow">
                           <div>
                             <strong>v{version.version}</strong>
-                            <small>{new Date(version.uploadedAt).toLocaleString()}</small>
+                            <small>{formatDateTimeUk(version.uploadedAt)}</small>
                             <small>{version.uploadedBy}</small>
                             <small>{version.changeNote ?? "-"}</small>
                           </div>
@@ -5169,7 +5336,7 @@ function App() {
                       <td>{member.email}</td>
                       <td>{member.role}</td>
                       <td>{member.permission.manageTeam ? "Manage" : "Limited"}</td>
-                      <td>{new Date(member.dateAdded).toLocaleDateString()}</td>
+                      <td>{formatDateUk(member.dateAdded)}</td>
                       <td>{member.status}</td>
                     </tr>
                   ))}
@@ -5213,7 +5380,7 @@ function App() {
                       <div>
                         <strong>{submission.templateName}</strong>
                         <small>
-                          {submission.status === "completed" ? "Completed" : "Draft"} • Updated {new Date(submission.updatedAt).toLocaleString()}
+                          {submission.status === "completed" ? "Completed" : "Draft"} • Updated {formatDateTimeUk(submission.updatedAt)}
                         </small>
                         <small>{submission.createdBy}</small>
                       </div>
@@ -5333,7 +5500,7 @@ function App() {
                       <small>{entry.item}</small>
                       <small>{entry.user}</small>
                     </div>
-                    <span>{new Date(entry.at).toLocaleString()}</span>
+                    <span>{formatDateTimeUk(entry.at)}</span>
                   </div>
                 ))}
                 {selectedProjectActivity.length === 0 ? <p>No project activity yet.</p> : null}
@@ -5614,7 +5781,7 @@ function App() {
             </div>
             <p className="opsSubtle">
               {liveGps
-                ? `Captured ${new Date(liveGps.capturedAt).toLocaleTimeString()} (${liveGps.source}).`
+                ? `Captured ${formatTimeUk(liveGps.capturedAt)} (${liveGps.source}).`
                 : "Map will update when GPS is captured."}
             </p>
           </section>
@@ -5657,7 +5824,7 @@ function App() {
               <p>{pageSubtitle}</p>
             </div>
             <div className="opsHeaderMeta">
-              <span>{new Date().toLocaleDateString()}</span>
+              <span>{formatDateUk(new Date())}</span>
               <span>{currentUser.name}</span>
             </div>
           </header>

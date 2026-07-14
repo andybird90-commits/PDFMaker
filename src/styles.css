@@ -856,6 +856,74 @@ label {
   gap: 0.8rem;
 }
 
+.opsHomeStack {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.opsWeatherWidget {
+  border: 1px solid rgba(62, 97, 136, 0.52);
+  border-radius: 14px;
+  background:
+    linear-gradient(120deg, rgba(10, 24, 44, 0.88), rgba(8, 18, 34, 0.84)),
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.22), transparent 45%);
+  padding: 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.opsWeatherPrimary p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #f8fafc;
+}
+
+.opsWeatherPrimary strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 2rem;
+  line-height: 1;
+  color: #f8fafc;
+}
+
+.opsWeatherPrimary span {
+  display: block;
+  margin-top: 0.3rem;
+  color: #c5d8f2;
+  font-size: 0.82rem;
+}
+
+.opsWeatherMetric {
+  border-left: 1px solid rgba(109, 137, 172, 0.32);
+  padding-left: 0.65rem;
+}
+
+.opsWeatherMetric strong {
+  display: block;
+  font-size: 1.45rem;
+  color: #f8fafc;
+  line-height: 1.05;
+}
+
+.opsWeatherMetric span {
+  display: block;
+  margin-top: 0.2rem;
+  color: #c5d8f2;
+  font-size: 0.84rem;
+}
+
+.opsWeatherMetric small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #9fb2cd;
+}
+
+.opsWeatherWidget > .opsSubtle {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .opsLandingTile {
   width: 100%;
   min-height: 120px;
@@ -978,6 +1046,11 @@ label {
   .opsLandingTiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .opsWeatherWidget {
+    grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
+    align-items: center;
+    column-gap: 0.75rem;
+  }
 }
 
 @media (min-width: 1100px) {
@@ -1031,6 +1104,11 @@ label {
   }
   .opsLandingTiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .opsWeatherWidget {
+    grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
+    align-items: center;
+    column-gap: 0.85rem;
   }
 }
 
