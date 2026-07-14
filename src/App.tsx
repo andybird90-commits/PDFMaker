@@ -4648,8 +4648,6 @@ function App() {
       { key: "home", label: "Home", path: "/home" },
       { key: "projects", label: "Projects", path: "/projects" },
       { key: "timesheets", label: "Timesheets", path: "/timesheets" },
-      { key: "forms", label: "Forms", path: "/forms" },
-      { key: "more", label: "More", path: "/sign-out" },
     ] as const;
 
     const mapEmbedUrl = toMapEmbedUrl(liveGps);
