@@ -5524,25 +5524,6 @@ function App() {
 
         content = (
           <div className="opsProjectWorkspace">
-            <section className="opsPanel opsProjectWorkspaceHeader">
-              <div className="opsProjectMeta">
-                <h3>{workspaceProject?.name ?? "Project"}</h3>
-                <p>
-                  {workspaceProject?.client} • {workspaceProject?.code} • {workspaceProject?.address}
-                </p>
-                <p>
-                  Status: {workspaceProject?.status} • Manager: {workspaceProject?.manager} • Start: {workspaceProject?.startDate}
-                </p>
-              </div>
-              <div className="opsInline">
-                <button type="button" onClick={() => setShowNewProjectModal(true)}>
-                  Edit Project
-                </button>
-                <button type="button" onClick={() => notify("More project actions opened.")}>
-                  More actions
-                </button>
-              </div>
-            </section>
             {workspaceContent}
           </div>
         );
