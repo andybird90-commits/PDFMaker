@@ -5020,7 +5020,7 @@ function App() {
           return nodes.flatMap((folder) => {
             const children = workspaceFolders.filter((child) => child.parentId === folder.id);
             const fileCount = projectFiles.filter((file) => file.projectId === workspaceProjectId && file.folderId === folder.id).length;
-            const expanded = expandedFolderIds[folder.id] ?? depth < 1;
+            const expanded = expandedFolderIds[folder.id] ?? false;
             return [
               <div
                 key={folder.id}
