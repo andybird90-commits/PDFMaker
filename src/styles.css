@@ -869,8 +869,10 @@ label {
     radial-gradient(circle at top left, rgba(59, 130, 246, 0.22), transparent 45%);
   padding: 0.9rem;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(140px, 0.95fr);
   gap: 0.6rem;
+  align-items: center;
+  column-gap: 0.8rem;
 }
 
 .opsWeatherLeft {
@@ -966,12 +968,6 @@ label {
 @media (max-width: 760px) {
   .opsWeatherStats {
     grid-template-columns: 1fr;
-  }
-  .opsWeatherRight {
-    border-left: 0;
-    border-top: 1px solid rgba(109, 137, 172, 0.38);
-    padding-left: 0;
-    padding-top: 0.7rem;
   }
 }
 
