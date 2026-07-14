@@ -5128,6 +5128,17 @@ function App() {
                 <button type="button" onClick={() => navigateOps(`/projects/${workspaceProject?.slug ?? route.projectId}/files`)}>
                   Open Files Manager
                 </button>
+                <input
+                  ref={projectUploadInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.dwg,.dxf,.ifc,.rvt,image/*"
+                  className="hiddenInput"
+                  onChange={(event) => {
+                    void handleProjectFileUpload(event.target.files, versionUploadTargetId ?? undefined);
+                    event.currentTarget.value = "";
+                  }}
+                />
               </div>
               <div className="opsList">
                 {projectDrawingFiles.map((file) => (
