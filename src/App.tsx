@@ -5022,7 +5022,11 @@ function App() {
             const fileCount = projectFiles.filter((file) => file.projectId === workspaceProjectId && file.folderId === folder.id).length;
             const expanded = expandedFolderIds[folder.id] ?? depth < 1;
             return [
-              <div key={folder.id} className={`opsFolderTreeRow ${selectedFolderId === folder.id ? "active" : ""}`} style={{ paddingLeft: `${depth * 14}px` }}>
+              <div
+                key={folder.id}
+                className={`opsFolderTreeRow ${selectedFolderId === folder.id ? "active" : ""}`}
+                style={{ paddingLeft: `${depth * 14}px` }}
+              >
                 <button type="button" className="opsFolderTreeToggle" onClick={() => toggleFolderExpanded(folder.id)}>
                   {children.length > 0 ? (expanded ? "▼" : "▶") : "•"}
                 </button>
@@ -5034,31 +5038,8 @@ function App() {
                     setExpandedFolderIds((prev) => ({ ...prev, [folder.id]: true }));
                   }}
                 >
-                  {folder.name} <span>({fileCount})</span>
+                  📁 {folder.name} <span>({fileCount})</span>
                 </button>
-                <div className="opsFolderTreeActions">
-                  <button
-                    type="button"
-                    title="Create subfolder"
-                    onClick={() => {
-                      const subfolderName = window.prompt(`New subfolder inside "${folder.name}"`, "")?.trim();
-                      if (!subfolderName) return;
-                      void addFolder({ name: subfolderName, parentId: folder.id });
-                      setExpandedFolderIds((prev) => ({ ...prev, [folder.id]: true }));
-                    }}
-                  >
-                    Sub
-                  </button>
-                  <button type="button" title="Rename folder" onClick={() => renameFolder(folder.id)}>
-                    Rename
-                  </button>
-                  <button type="button" title="Move folder" onClick={() => moveFolder(folder.id)}>
-                    Move
-                  </button>
-                  <button type="button" title="Delete folder" onClick={() => deleteFolder(folder.id)}>
-                    Delete
-                  </button>
-                </div>
               </div>,
               ...(expanded ? renderFolderTree(folder.id, depth + 1) : []),
             ];
@@ -5108,19 +5089,44 @@ function App() {
             </section>
           );
         } else if (workspaceSection === "files") {
+          const selectedWorkspaceFolder = selectedFolderId ? workspaceFolders.find((folder) => folder.id === selectedFolderId) ?? null : null;
           const activeFolderName =
             selectedFolderId === null ? "All folders" : workspaceFolders.find((folder) => folder.id === selectedFolderId)?.name ?? "Folder";
           workspaceContent = (
             <div className="opsWorkspace3Col">
               <aside className="opsPanel opsWorkspacePanel">
                 <h3>Folders</h3>
-                <p className="opsSubtle">Choose a folder to filter files. Use "Sub" to create a child folder.</p>
+                <p className="opsSubtle">Explorer-style tree. Select a folder, then use actions below.</p>
                 <div className="opsInline">
                   <button type="button" className={selectedFolderId === null ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
                     All Files
                   </button>
                   <button type="button" onClick={() => void addFolder()} disabled={!projectPermission.manageFolders}>
                     Create Folder
+                  </button>
+                </div>
+                <div className="opsInline">
+                  <button
+                    type="button"
+                    disabled={!projectPermission.manageFolders || !selectedWorkspaceFolder}
+                    onClick={() => {
+                      if (!selectedWorkspaceFolder) return;
+                      const subfolderName = window.prompt(`New subfolder inside "${selectedWorkspaceFolder.name}"`, "")?.trim();
+                      if (!subfolderName) return;
+                      void addFolder({ name: subfolderName, parentId: selectedWorkspaceFolder.id });
+                      setExpandedFolderIds((prev) => ({ ...prev, [selectedWorkspaceFolder.id]: true }));
+                    }}
+                  >
+                    New Subfolder
+                  </button>
+                  <button type="button" disabled={!projectPermission.manageFolders || !selectedWorkspaceFolder} onClick={() => selectedWorkspaceFolder && renameFolder(selectedWorkspaceFolder.id)}>
+                    Rename
+                  </button>
+                  <button type="button" disabled={!projectPermission.manageFolders || !selectedWorkspaceFolder} onClick={() => selectedWorkspaceFolder && moveFolder(selectedWorkspaceFolder.id)}>
+                    Move
+                  </button>
+                  <button type="button" disabled={!projectPermission.manageFolders || !selectedWorkspaceFolder} onClick={() => selectedWorkspaceFolder && deleteFolder(selectedWorkspaceFolder.id)}>
+                    Delete
                   </button>
                 </div>
                 <div className="opsFolderTree">{renderFolderTree(null)}</div>

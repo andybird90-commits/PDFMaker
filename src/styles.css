@@ -1271,23 +1271,21 @@ label {
   margin-top: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.08rem;
 }
 
 .opsFolderTreeRow {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  border: 1px solid rgba(129, 159, 195, 0.2);
-  border-radius: 10px;
-  padding: 0.28rem 0.35rem;
-  background: rgba(12, 28, 46, 0.42);
+  gap: 0.2rem;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.08rem 0.1rem;
+  background: transparent;
 }
 
 .opsFolderTreeRow.active {
-  border-color: rgba(249, 115, 22, 0.7);
-  background: rgba(249, 115, 22, 0.12);
+  background: rgba(59, 130, 246, 0.16);
 }
 
 .opsFolderTreeToggle {
@@ -1298,25 +1296,15 @@ label {
 .opsFolderTreeName {
   flex: 1;
   text-align: left;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0.3rem;
+  min-height: 28px;
 }
 
 .opsFolderTreeName span {
   color: #94a3b8;
-}
-
-.opsFolderTreeActions {
-  display: flex;
-  gap: 0.15rem;
-  flex-wrap: wrap;
-}
-
-.opsFolderTreeActions button {
-  min-height: 24px;
-  min-width: 40px;
-  padding: 0.12rem 0.3rem;
-  font-size: 0.62rem;
-  background: rgba(255, 255, 255, 0.03);
 }
 
 .opsFileRows {
