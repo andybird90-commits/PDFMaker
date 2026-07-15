@@ -213,8 +213,6 @@ const MAX_SCALE = 4;
 const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
 const OPS_STORAGE_KEY = "mep-ops.local.v1";
 const PROJECT_FILES_BUCKET = "project-files";
-const DAILY_INTRO_VIDEO_PATH = "/replicate-prediction-f9s42e48m9rmw0cxz73ag0gahr.mp4";
-const DAILY_INTRO_SEEN_KEY_PREFIX = "mep-ops.daily-intro.v1";
 const PIN_STATUS_COLOR: Record<PinStatus, string> = {
   open: "#dc2626",
   in_progress: "#2563eb",
@@ -576,15 +574,6 @@ function formatLongDateUk(value: string | number | Date): string {
   });
 }
 
-function getLocalDayKey(value: string | number | Date): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "invalid-date";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function dataUrlMimeType(dataUrl?: string): string | null {
   if (!dataUrl) return null;
   const match = dataUrl.match(/^data:([^;]+);base64,/i);
@@ -804,7 +793,6 @@ function App() {
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
   const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
-  const [showDailyIntroVideo, setShowDailyIntroVideo] = useState<boolean>(false);
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -1382,24 +1370,6 @@ function App() {
 
     setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
   }, [authSession, authWorkerId, authWorker, currentUser.name]);
-
-  useEffect(() => {
-    if (!authSession) {
-      setShowDailyIntroVideo(false);
-      return;
-    }
-    const identity = authSession.user?.email?.trim().toLowerCase() || authSession.user?.id || currentUser.email.toLowerCase();
-    if (!identity) return;
-    const todayKey = getLocalDayKey(new Date());
-    const storageKey = `${DAILY_INTRO_SEEN_KEY_PREFIX}:${identity}`;
-    const seenToday = window.localStorage.getItem(storageKey);
-    if (seenToday === todayKey) {
-      setShowDailyIntroVideo(false);
-      return;
-    }
-    window.localStorage.setItem(storageKey, todayKey);
-    setShowDailyIntroVideo(true);
-  }, [authSession, currentUser.email]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -6216,22 +6186,6 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
   if (!authSession) {
     return renderAuthGate();
-  }
-
-  if (showDailyIntroVideo) {
-    return (
-      <main className="dailyIntroScreen" aria-label="Daily intro loading screen">
-        <section className="dailyIntroShell">
-          <button type="button" className="dailyIntroClose" onClick={() => setShowDailyIntroVideo(false)}>
-            Enter app
-          </button>
-          <video className="dailyIntroVideo" autoPlay playsInline controls onEnded={() => setShowDailyIntroVideo(false)}>
-            <source src={DAILY_INTRO_VIDEO_PATH} type="video/mp4" />
-            Your browser does not support MP4 playback.
-          </video>
-        </section>
-      </main>
-    );
   }
 
   return (
