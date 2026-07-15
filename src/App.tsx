@@ -212,8 +212,7 @@ const MIN_SCALE = 0.4;
 const MAX_SCALE = 4;
 const CUSTOM_STAMPS_STORAGE_KEY = "pdfmaker.customStamps.v1";
 const OPS_STORAGE_KEY = "mep-ops.local.v1";
-const DAILY_INTRO_VIDEO_PATH = "/replicate-prediction-f9s42e48m9rmw0cxz73ag0gahr.mp4";
-const DAILY_INTRO_SEEN_KEY_PREFIX = "mep-ops.daily-intro.v1";
+const PROJECT_FILES_BUCKET = "project-files";
 const PIN_STATUS_COLOR: Record<PinStatus, string> = {
   open: "#dc2626",
   in_progress: "#2563eb",
@@ -575,13 +574,10 @@ function formatLongDateUk(value: string | number | Date): string {
   });
 }
 
-function getLocalDayKey(value: string | number | Date): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "invalid-date";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function dataUrlMimeType(dataUrl?: string): string | null {
+  if (!dataUrl) return null;
+  const match = dataUrl.match(/^data:([^;]+);base64,/i);
+  return match ? match[1] : null;
 }
 
 function weatherCodeToLabel(code: number): string {
@@ -797,7 +793,6 @@ function App() {
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [authDiagnosticsBusy, setAuthDiagnosticsBusy] = useState<boolean>(false);
   const [authDiagnosticsOutput, setAuthDiagnosticsOutput] = useState<string>("");
-  const [showDailyIntroVideo, setShowDailyIntroVideo] = useState<boolean>(false);
   const opsStorageWarnedRef = useRef<boolean>(false);
 
   const canvasRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
@@ -1186,7 +1181,7 @@ function App() {
             supabase.from("folders").select("id,project_id,name,parent_id").order("created_at", { ascending: false }),
             supabase
               .from("project_files")
-              .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
+              .select("id,project_id,folder_id,name,status,updated_at,mime_type,storage_path,uploaded_by,version")
               .order("updated_at", { ascending: false }),
           ]);
           if (workersRes.error) throw workersRes.error;
@@ -1219,6 +1214,7 @@ function App() {
             status: row.status,
             updatedAt: row.updated_at,
             mimeType: row.mime_type ?? undefined,
+            storagePath: row.storage_path ?? undefined,
             uploadedBy: row.uploaded_by ?? currentUser.name,
             version: row.version ?? 1,
           }));
@@ -1374,24 +1370,6 @@ function App() {
 
     setWorkers((prev) => [nextWorker, ...prev.filter((worker) => worker.id !== nextWorker.id)]);
   }, [authSession, authWorkerId, authWorker, currentUser.name]);
-
-  useEffect(() => {
-    if (!authSession) {
-      setShowDailyIntroVideo(false);
-      return;
-    }
-    const identity = authSession.user?.email?.trim().toLowerCase() || authSession.user?.id || currentUser.email.toLowerCase();
-    if (!identity) return;
-    const todayKey = getLocalDayKey(new Date());
-    const storageKey = `${DAILY_INTRO_SEEN_KEY_PREFIX}:${identity}`;
-    const seenToday = window.localStorage.getItem(storageKey);
-    if (seenToday === todayKey) {
-      setShowDailyIntroVideo(false);
-      return;
-    }
-    window.localStorage.setItem(storageKey, todayKey);
-    setShowDailyIntroVideo(true);
-  }, [authSession, currentUser.email]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2707,11 +2685,26 @@ function App() {
       setOpsLoading(true);
       try {
         const now = new Date().toISOString();
+        let storagePath: string | null = null;
+        if (override?.dataUrl) {
+          const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+          storagePath = `${selectedProjectId}/${Date.now()}-${makeId()}-${safeName}`;
+          const uploadBytes = dataUrlToBytes(override.dataUrl);
+          const uploadContentType = override.mimeType ?? dataUrlMimeType(override.dataUrl) ?? "application/octet-stream";
+          const uploadRes = await supabase.storage.from(PROJECT_FILES_BUCKET).upload(storagePath, toArrayBuffer(uploadBytes), {
+            contentType: uploadContentType,
+            upsert: true,
+          });
+          if (uploadRes.error) {
+            throw uploadRes.error;
+          }
+        }
         const insertRecord = {
           project_id: selectedProjectId,
           folder_id: targetFolderId,
           name,
           mime_type: override?.mimeType ?? null,
+          storage_path: storagePath,
           uploaded_by: override?.uploadedBy ?? currentUser.name,
           version: 1,
           status: "Draft",
@@ -2720,7 +2713,7 @@ function App() {
         const { data, error } = await supabase
           .from("project_files")
           .insert(insertRecord)
-          .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
+          .select("id,project_id,folder_id,name,status,updated_at,mime_type,storage_path,uploaded_by,version")
           .single();
         if (error) {
           const message = error.message.toLowerCase();
@@ -2728,7 +2721,7 @@ function App() {
             const retry = await supabase
               .from("project_files")
               .insert({ ...insertRecord, folder_id: null })
-              .select("id,project_id,folder_id,name,status,updated_at,mime_type,uploaded_by,version")
+              .select("id,project_id,folder_id,name,status,updated_at,mime_type,storage_path,uploaded_by,version")
               .single();
             if (retry.error) throw retry.error;
             const retried = retry.data;
@@ -2740,6 +2733,7 @@ function App() {
               status: retried.status,
               updatedAt: retried.updated_at,
               mimeType: retried.mime_type ?? override?.mimeType,
+              storagePath: retried.storage_path ?? storagePath ?? undefined,
               dataUrl: override?.dataUrl,
               uploadedBy: retried.uploaded_by ?? override?.uploadedBy ?? currentUser.name,
               version: retried.version ?? 1,
@@ -2760,6 +2754,7 @@ function App() {
           status: data.status,
           updatedAt: data.updated_at,
           mimeType: data.mime_type ?? override?.mimeType,
+          storagePath: data.storage_path ?? storagePath ?? undefined,
           dataUrl: override?.dataUrl,
           uploadedBy: data.uploaded_by ?? override?.uploadedBy ?? currentUser.name,
           version: data.version ?? 1,
@@ -3254,13 +3249,54 @@ function App() {
     logProjectActivity("file copied", file.name, selectedProjectId);
   }
 
-  function downloadProjectFile(file: ProjectFile): void {
-    if (!file.dataUrl) {
+  async function ensureProjectFileBytes(file: ProjectFile): Promise<Uint8Array | null> {
+    if (file.dataUrl) {
+      return dataUrlToBytes(file.dataUrl);
+    }
+    if (!file.storagePath || !supabase || !hasSupabaseConfig) {
+      return null;
+    }
+
+    const storage = supabase.storage.from(PROJECT_FILES_BUCKET);
+    const directDownload = await storage.download(file.storagePath);
+    if (!directDownload.error && directDownload.data) {
+      return new Uint8Array(await directDownload.data.arrayBuffer());
+    }
+
+    const signed = await storage.createSignedUrl(file.storagePath, 120);
+    if (!signed.error && signed.data?.signedUrl) {
+      try {
+        const response = await fetch(signed.data.signedUrl);
+        if (response.ok) {
+          return new Uint8Array(await response.arrayBuffer());
+        }
+      } catch {
+        // Continue to public URL fallback.
+      }
+    }
+
+    const publicUrl = storage.getPublicUrl(file.storagePath);
+    if (publicUrl.data.publicUrl) {
+      try {
+        const response = await fetch(publicUrl.data.publicUrl);
+        if (response.ok) {
+          return new Uint8Array(await response.arrayBuffer());
+        }
+      } catch {
+        // No-op; return null below.
+      }
+    }
+
+    return null;
+  }
+
+  async function downloadProjectFile(file: ProjectFile): Promise<void> {
+    const fileBytes = await ensureProjectFileBytes(file);
+    if (!fileBytes) {
       notify("No file content is available for download yet.");
       return;
     }
-    const bytes = dataUrlToBytes(file.dataUrl);
-    const blob = new Blob([toArrayBuffer(bytes)], { type: file.mimeType ?? "application/octet-stream" });
+    const blob = new Blob([toArrayBuffer(fileBytes)], { type: file.mimeType ?? "application/octet-stream" });
     downloadBlob(blob, file.name);
     logProjectActivity("file downloaded", file.name, selectedProjectId);
   }
@@ -3274,21 +3310,29 @@ function App() {
       notify("Only PDF drawings can be opened in the PDF editor.");
       return;
     }
-    if (!file.dataUrl) {
-      notify("No source bytes available for this file.");
+    const sourceBytes = await ensureProjectFileBytes(file);
+    if (!sourceBytes) {
+      notify(
+        "File bytes are unavailable on this device. Verify project_files.storage_path and Supabase Storage bucket/policies for project-files.",
+      );
       return;
     }
-    const bytes = dataUrlToBytes(file.dataUrl);
-    const drawingFile = new File([toArrayBuffer(bytes)], file.name, { type: "application/pdf" });
+    const drawingFile = new File([toArrayBuffer(sourceBytes)], file.name, { type: "application/pdf" });
     setProjectEditorContext({
       projectId: selectedProjectId,
       fileId: file.id,
       fileName: file.name,
     });
-    setActiveModule("markup-studio");
-    await handlePdfFile(drawingFile);
-    logProjectActivity("open in pdf editor", file.name, selectedProjectId);
-    notify(`Opened ${file.name} in PDF editor.`);
+    try {
+      setActiveModule("markup-studio");
+      await handlePdfFile(drawingFile);
+      logProjectActivity("open in pdf editor", file.name, selectedProjectId);
+      notify(`Opened ${file.name} in PDF editor.`);
+    } catch (error) {
+      setProjectEditorContext(null);
+      setActiveModule("operations");
+      notify(`Could not open ${file.name}: ${getErrorMessage(error)}`);
+    }
   }
 
   async function openProjectFileFullView(file: ProjectFile, projectSlug: string): Promise<void> {
@@ -6133,22 +6177,6 @@ function App() {
 
   if (!authSession) {
     return renderAuthGate();
-  }
-
-  if (showDailyIntroVideo) {
-    return (
-      <main className="dailyIntroScreen" aria-label="Daily intro loading screen">
-        <section className="dailyIntroShell">
-          <button type="button" className="dailyIntroClose" onClick={() => setShowDailyIntroVideo(false)}>
-            Enter app
-          </button>
-          <video className="dailyIntroVideo" autoPlay playsInline controls onEnded={() => setShowDailyIntroVideo(false)}>
-            <source src={DAILY_INTRO_VIDEO_PATH} type="video/mp4" />
-            Your browser does not support MP4 playback.
-          </video>
-        </section>
-      </main>
-    );
   }
 
   return (
