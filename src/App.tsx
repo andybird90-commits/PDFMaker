@@ -1548,21 +1548,6 @@ function App() {
     return btoa(binary);
   }
 
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") {
-        reject(new Error("Could not convert blob to data URL."));
-        return;
-      }
-      resolve(reader.result);
-    };
-    reader.onerror = () => reject(new Error("Could not read blob."));
-    reader.readAsDataURL(blob);
-  });
-}
-
   async function handlePdfFile(file: File): Promise<void> {
     const data = new Uint8Array(await file.arrayBuffer());
     const document: BatchDocument = {
@@ -3264,18 +3249,18 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
     logProjectActivity("file copied", file.name, selectedProjectId);
   }
 
-  async function ensureProjectFileDataUrl(file: ProjectFile): Promise<string | null> {
-    if (file.dataUrl) return file.dataUrl;
-    if (!file.storagePath || !supabase || !hasSupabaseConfig) return null;
-    const persistDataUrl = (dataUrl: string): string => {
-      setProjectFiles((prev) => prev.map((item) => (item.id === file.id ? { ...item, dataUrl } : item)));
-      return dataUrl;
-    };
-    const storage = supabase.storage.from(PROJECT_FILES_BUCKET);
+  async function ensureProjectFileBytes(file: ProjectFile): Promise<Uint8Array | null> {
+    if (file.dataUrl) {
+      return dataUrlToBytes(file.dataUrl);
+    }
+    if (!file.storagePath || !supabase || !hasSupabaseConfig) {
+      return null;
+    }
 
+    const storage = supabase.storage.from(PROJECT_FILES_BUCKET);
     const directDownload = await storage.download(file.storagePath);
     if (!directDownload.error && directDownload.data) {
-      return persistDataUrl(await blobToDataUrl(directDownload.data));
+      return new Uint8Array(await directDownload.data.arrayBuffer());
     }
 
     const signed = await storage.createSignedUrl(file.storagePath, 120);
@@ -3283,7 +3268,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
       try {
         const response = await fetch(signed.data.signedUrl);
         if (response.ok) {
-          return persistDataUrl(await blobToDataUrl(await response.blob()));
+          return new Uint8Array(await response.arrayBuffer());
         }
       } catch {
         // Continue to public URL fallback.
@@ -3295,7 +3280,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
       try {
         const response = await fetch(publicUrl.data.publicUrl);
         if (response.ok) {
-          return persistDataUrl(await blobToDataUrl(await response.blob()));
+          return new Uint8Array(await response.arrayBuffer());
         }
       } catch {
         // No-op; return null below.
@@ -3306,13 +3291,12 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   }
 
   async function downloadProjectFile(file: ProjectFile): Promise<void> {
-    const sourceDataUrl = await ensureProjectFileDataUrl(file);
-    if (!sourceDataUrl) {
+    const fileBytes = await ensureProjectFileBytes(file);
+    if (!fileBytes) {
       notify("No file content is available for download yet.");
       return;
     }
-    const bytes = dataUrlToBytes(sourceDataUrl);
-    const blob = new Blob([toArrayBuffer(bytes)], { type: file.mimeType ?? "application/octet-stream" });
+    const blob = new Blob([toArrayBuffer(fileBytes)], { type: file.mimeType ?? "application/octet-stream" });
     downloadBlob(blob, file.name);
     logProjectActivity("file downloaded", file.name, selectedProjectId);
   }
@@ -3326,22 +3310,29 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
       notify("Only PDF drawings can be opened in the PDF editor.");
       return;
     }
-    const sourceDataUrl = await ensureProjectFileDataUrl(file);
-    if (!sourceDataUrl) {
-      notify("File bytes are unavailable on this device. Verify Supabase Storage bucket/policies for project-files.");
+    const sourceBytes = await ensureProjectFileBytes(file);
+    if (!sourceBytes) {
+      notify(
+        "File bytes are unavailable on this device. Verify project_files.storage_path and Supabase Storage bucket/policies for project-files.",
+      );
       return;
     }
-    const bytes = dataUrlToBytes(sourceDataUrl);
-    const drawingFile = new File([toArrayBuffer(bytes)], file.name, { type: "application/pdf" });
+    const drawingFile = new File([toArrayBuffer(sourceBytes)], file.name, { type: "application/pdf" });
     setProjectEditorContext({
       projectId: selectedProjectId,
       fileId: file.id,
       fileName: file.name,
     });
-    setActiveModule("markup-studio");
-    await handlePdfFile(drawingFile);
-    logProjectActivity("open in pdf editor", file.name, selectedProjectId);
-    notify(`Opened ${file.name} in PDF editor.`);
+    try {
+      setActiveModule("markup-studio");
+      await handlePdfFile(drawingFile);
+      logProjectActivity("open in pdf editor", file.name, selectedProjectId);
+      notify(`Opened ${file.name} in PDF editor.`);
+    } catch (error) {
+      setProjectEditorContext(null);
+      setActiveModule("operations");
+      notify(`Could not open ${file.name}: ${getErrorMessage(error)}`);
+    }
   }
 
   async function openProjectFileFullView(file: ProjectFile, projectSlug: string): Promise<void> {
