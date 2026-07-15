@@ -3297,13 +3297,42 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   async function ensureProjectFileDataUrl(file: ProjectFile): Promise<string | null> {
     if (file.dataUrl) return file.dataUrl;
     if (!file.storagePath || !supabase || !hasSupabaseConfig) return null;
-    const { data, error } = await supabase.storage.from(PROJECT_FILES_BUCKET).download(file.storagePath);
-    if (error || !data) {
-      return null;
+    const persistDataUrl = (dataUrl: string): string => {
+      setProjectFiles((prev) => prev.map((item) => (item.id === file.id ? { ...item, dataUrl } : item)));
+      return dataUrl;
+    };
+    const storage = supabase.storage.from(PROJECT_FILES_BUCKET);
+
+    const directDownload = await storage.download(file.storagePath);
+    if (!directDownload.error && directDownload.data) {
+      return persistDataUrl(await blobToDataUrl(directDownload.data));
     }
-    const dataUrl = await blobToDataUrl(data);
-    setProjectFiles((prev) => prev.map((item) => (item.id === file.id ? { ...item, dataUrl } : item)));
-    return dataUrl;
+
+    const signed = await storage.createSignedUrl(file.storagePath, 120);
+    if (!signed.error && signed.data?.signedUrl) {
+      try {
+        const response = await fetch(signed.data.signedUrl);
+        if (response.ok) {
+          return persistDataUrl(await blobToDataUrl(await response.blob()));
+        }
+      } catch {
+        // Continue to public URL fallback.
+      }
+    }
+
+    const publicUrl = storage.getPublicUrl(file.storagePath);
+    if (publicUrl.data.publicUrl) {
+      try {
+        const response = await fetch(publicUrl.data.publicUrl);
+        if (response.ok) {
+          return persistDataUrl(await blobToDataUrl(await response.blob()));
+        }
+      } catch {
+        // No-op; return null below.
+      }
+    }
+
+    return null;
   }
 
   async function downloadProjectFile(file: ProjectFile): Promise<void> {
@@ -3329,7 +3358,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
     }
     const sourceDataUrl = await ensureProjectFileDataUrl(file);
     if (!sourceDataUrl) {
-      notify("No source bytes available for this file.");
+      notify("File bytes are unavailable on this device. Verify Supabase Storage bucket/policies for project-files.");
       return;
     }
     const bytes = dataUrlToBytes(sourceDataUrl);
